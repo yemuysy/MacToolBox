@@ -32,7 +32,9 @@
 	<string>MacToolBox needs to send Apple events to manage disks and inspect running applications.</string>
 
 	<!-- 右键增强（免费路线）：系统服务，无需证书、无需 Finder Sync 扩展。
-	     出现在 Finder 右键「服务」子菜单，复用主程序 RightClickActionHandlers。 -->
+	     出现在 Finder 右键「服务」子菜单，复用主程序 RightClickActionHandlers。
+	     注意：NSServices 受 macOS 设计限制，只能出现在「服务」子菜单，无法置顶到
+	     右键一级菜单；要一级菜单必须用 Finder Sync 扩展（需签名）。 -->
 	<key>NSServices</key>
 	<array>
 		<dict>
@@ -44,8 +46,8 @@
 			<string>com.yemu.mactoolbox</string>
 			<key>NSUserData</key>
 			<string>copyPath</string>
-			<key>NSRequiredContext</key>
-			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
 		<dict>
 			<key>NSMenuItem</key>
@@ -56,8 +58,8 @@
 			<string>com.yemu.mactoolbox</string>
 			<key>NSUserData</key>
 			<string>newFile</string>
-			<key>NSRequiredContext</key>
-			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
 		<dict>
 			<key>NSMenuItem</key>
@@ -68,8 +70,8 @@
 			<string>com.yemu.mactoolbox</string>
 			<key>NSUserData</key>
 			<string>openWith</string>
-			<key>NSRequiredContext</key>
-			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
 		<dict>
 			<key>NSMenuItem</key>
@@ -80,8 +82,8 @@
 			<string>com.yemu.mactoolbox</string>
 			<key>NSUserData</key>
 			<string>delete</string>
-			<key>NSRequiredContext</key>
-			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
 		<dict>
 			<key>NSMenuItem</key>
@@ -92,8 +94,8 @@
 			<string>com.yemu.mactoolbox</string>
 			<key>NSUserData</key>
 			<string>toggleHidden</string>
-			<key>NSRequiredContext</key>
-			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
 	</array>
 </dict>

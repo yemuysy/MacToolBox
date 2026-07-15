@@ -377,15 +377,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// NSServices 入口：由 Info.plist 的 `NSServices` 声明触发，`userData` 区分动作。
     /// 零证书，复用 `RightClickActionHandlers`。
-    @objc func rightClickService(_ pboard: NSPasteboard, userData: String, error: NSErrorPointer) {
+    @objc func rightClickService(_ pboard: NSPasteboard, userData: String?, error: NSErrorPointer) {
         Task { @MainActor in
-            let urls = (pboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]) ?? []
+            // 从剪贴板读取选中的文件：优先 file URL，回退到路径字符串
+            var urls: [URL] = []
+            if let fileURLs = pboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+                urls = fileURLs
+            } else if let paths = pboard.readObjects(forClasses: [NSString.self], options: nil) as? [String] {
+                urls = paths.map { URL(fileURLWithPath: $0) }
+            }
+            guard let action = userData else {
+                rcLog("RightClick(NSServices): missing userData")
+                return
+            }
             let cfg = ConfigStore.shared.rightClickConfig()
             guard cfg.enabled else {
                 rcLog("RightClick(NSServices): feature disabled, skip")
                 return
             }
-            switch userData {
+            switch action {
             case "copyPath":
                 if cfg.showCopyPath { RightClickActionHandlers.copyPaths(urls) }
             case "newFile":
@@ -399,7 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "toggleHidden":
                 if cfg.showToggleHidden { RightClickActionHandlers.toggleHidden(urls) }
             default:
-                rcLog("RightClick(NSServices): unknown userData \(userData)")
+                rcLog("RightClick(NSServices): unknown userData \(action)")
             }
         }
     }
