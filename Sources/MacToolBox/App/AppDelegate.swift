@@ -38,6 +38,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 5. 注册全局快捷键
         HotkeyService.shared.start()
 
+        // 6. 若滚轮控制功能启用且已授权，拉起滚轮拦截
+        if FeatureManager.shared.isEnabled(.scrollControl) {
+            ScrollControlService.shared.startIfEnabled()
+        }
+
+        // 7. 右键增强：常驻监听扩展点击（无论功能是否启用，扩展仅在 config.enabled 时渲染菜单）
+        RightClickService.shared.start()
+
         Logger.shared.info("MacToolBox bootstrap complete, windows: \(NSApp.windows.count), app isActive: \(NSApp.isActive)")
     }
 
@@ -50,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         statusTitleCancellable = nil
         SystemInfoService.shared.stop()
+        ScrollControlService.shared.disableInterception()
+        RightClickService.shared.stop()
         Logger.shared.info("MacToolBox terminating")
     }
 

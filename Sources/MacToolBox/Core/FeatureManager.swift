@@ -133,6 +133,16 @@ final class FeatureManager: ObservableObject {
                 id: .screenshot, title: "截图", icon: "camera.viewfinder",
                 isCore: false, defaultEnabled: true
             ) { AnyView(ScreenshotView()) },
+
+            FeatureDefinition(
+                id: .scrollControl, title: "滚轮控制", icon: "computermouse",
+                isCore: false, defaultEnabled: false
+            ) { AnyView(ScrollControlView().onAppear { ScrollControlService.shared.refreshPermission() }) },
+
+            FeatureDefinition(
+                id: .rightClick, title: "右键增强", icon: "rectangle.on.folder",
+                isCore: false, defaultEnabled: false
+            ) { AnyView(RightClickView().onAppear { RightClickService.shared.pushMenuConfig() }) },
         ]
     }
 }

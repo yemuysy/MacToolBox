@@ -2,7 +2,7 @@
 #
 # MacToolBox 构建脚本
 # 不依赖 Xcode，使用 swiftc + Command Line Tools 直接编译
-# 输出 build/MacToolBox.app
+# 输出 build/MacToolBox.app（含内嵌的 FinderSyncExt.appex 扩展）
 
 set -e
 
@@ -11,18 +11,22 @@ cd "$PROJECT_DIR"
 
 APP_NAME="MacToolBox"
 SOURCE_DIR="Sources/MacToolBox"
+SHARED_DIR="Sources/Shared"
+EXT_DIR="Sources/FinderSyncExt"
+EXT_NAME="FinderSyncExt"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
 echo "==> Building $APP_NAME"
 echo "    Project dir: $PROJECT_DIR"
 
-# 1. 清理旧构建
-rm -rf "$BUILD_DIR"
+# 1. 清理旧构建（仅清本脚本产物：.app bundle 与主二进制，保留 build/test 模块缓存以加速测试）
+rm -rf "$APP_BUNDLE"
+rm -f "$BUILD_DIR/$APP_NAME"
 mkdir -p "$BUILD_DIR"
 
-# 2. 收集所有 Swift 源文件
-SWIFT_FILES=$(find "$SOURCE_DIR" -name "*.swift" | sort)
+# 2. 收集所有 Swift 源文件（主程序 + 共享 IPC 层；扩展单独编译，不并入主程序）
+SWIFT_FILES=$(find "$SOURCE_DIR" "$SHARED_DIR" -name "*.swift" | sort)
 FILE_COUNT=$(echo "$SWIFT_FILES" | wc -l | tr -d ' ')
 echo "==> Found $FILE_COUNT source files"
 echo "$SWIFT_FILES" | sed 's/^/    /'
@@ -36,8 +40,8 @@ MIN_MACOS="13.0"
 ARCH=$(uname -m)
 echo "==> Target: $ARCH-apple-macos$MIN_MACOS"
 
-# 5. 编译
-echo "==> Compiling..."
+# 5. 编译主程序
+echo "==> Compiling main app..."
 swiftc \
     -sdk "$SDK_PATH" \
     -target "$ARCH-apple-macos$MIN_MACOS" \
@@ -50,9 +54,12 @@ swiftc \
     -framework Foundation \
     -framework DiskArbitration \
     -framework CoreFoundation \
+    -framework CoreGraphics \
+    -framework ApplicationServices \
     -framework IOKit \
     -framework OSLog \
     -framework Carbon \
+    -framework CryptoKit \
     -o "$BUILD_DIR/$APP_NAME" \
     $SWIFT_FILES
 
@@ -72,7 +79,6 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 printf 'APPL????' > "$APP_BUNDLE/Contents/PkgInfo"
 
 # 7. 复制图标资源
-# 主图标 (.icns) 和菜单栏模板图标 (png) 来自 Resources/ 目录
 ICON_DIR="Resources"
 if [ -f "$ICON_DIR/AppIcon.icns" ]; then
     cp "$ICON_DIR/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
@@ -87,7 +93,39 @@ else
     echo "    Warning: MenuBarIcon.png not found"
 fi
 
-# 8. 完成
+# 8. 编译并内嵌 Finder Sync 扩展（独立 mach-o bundle）
+echo "==> Compiling Finder Sync extension..."
+EXT_FILES=$(find "$EXT_DIR" "$SHARED_DIR" -name "*.swift" | sort)
+EXT_BIN="$BUILD_DIR/$EXT_NAME"
+swiftc \
+    -sdk "$SDK_PATH" \
+    -target "$ARCH-apple-macos$MIN_MACOS" \
+    -module-name "$EXT_NAME" \
+    -swift-version 6 \
+    -O \
+    -framework Foundation \
+    -framework AppKit \
+    -framework FinderSync \
+    -framework CryptoKit \
+    -Xlinker -bundle \
+    -o "$EXT_BIN" \
+    $EXT_FILES
+
+APPEX="$APP_BUNDLE/Contents/PlugIns/$EXT_NAME.appex"
+mkdir -p "$APPEX/Contents/MacOS"
+mkdir -p "$APPEX/Contents/Resources"
+cp "$EXT_BIN" "$APPEX/Contents/MacOS/$EXT_NAME"
+cp "$EXT_DIR/Info.plist" "$APPEX/Contents/Info.plist"
+echo "    $EXT_NAME.appex assembled"
+
+# 9. 代码签名（开发期 ad-hoc；分发需 Developer ID）
+#    先签扩展，再签主程序（主程序签名会校验内嵌 appex 的签名）
+echo "==> Code signing..."
+codesign --force --sign - "$APPEX"
+codesign --force --sign - "$APP_BUNDLE"
+echo "    signed appex + app"
+
+# 10. 完成
 APP_SIZE=$(du -sh "$APP_BUNDLE" | awk '{print $1}')
 echo ""
 echo "==> Build SUCCESS"

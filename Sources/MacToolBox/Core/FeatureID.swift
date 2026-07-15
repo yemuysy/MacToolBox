@@ -13,6 +13,8 @@ enum FeatureID: String, CaseIterable, Identifiable, Codable, Sendable {
     case cleanup
     case launchAgent
     case screenshot
+    case scrollControl
+    case rightClick
 
     var id: String { rawValue }
 }

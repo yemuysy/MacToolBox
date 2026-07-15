@@ -12,6 +12,10 @@ final class ConfigStore: @unchecked Sendable {
     private var symLinkStorage: [String: String] = [:]
     // 菜单栏显示配置
     private var menuBarStorage: MenuBarConfig = MenuBarConfig()
+    // 滚轮控制配置
+    private var scrollControlStorage: ScrollControlConfig = ScrollControlConfig()
+    // 右键增强配置
+    private var rightClickStorage: RightClickConfig = RightClickConfig()
 
     // 功能开关 + 快捷键（独立文件 features.json，避免破坏旧 config.json 结构）
     private var featureEnabledStorage: Set<String> = []
@@ -81,6 +85,44 @@ final class ConfigStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - 滚轮控制配置
+
+    /// 滚轮拦截 / 反向 / 平滑参数（参照 Mos）
+    struct ScrollControlConfig: Codable, Sendable {
+        var enabled: Bool = false           // 是否启用全局拦截
+        var reverseVertical: Bool = true    // 纵向反向（鼠标滚轮方向自然化）
+        var reverseHorizontal: Bool = false // 横向反向
+        var smooth: Bool = true             // 平滑滚动
+        var smoothStep: Double = 0.3        // 平滑度：每帧消耗剩余量比例 0.1~0.9（越大越跟手）
+        var smoothSpeed: Double = 3.0       // 加速度：原始 delta 放大倍率 1~10
+        var excludeTrackpad: Bool = true    // 触控板豁免（保持原生手感）
+    }
+
+    func scrollControlConfig() -> ScrollControlConfig {
+        queue.sync { scrollControlStorage }
+    }
+
+    func setScrollControlConfig(_ config: ScrollControlConfig) {
+        queue.sync(flags: .barrier) {
+            scrollControlStorage = config
+            save()
+        }
+    }
+
+    // MARK: - 右键增强配置
+
+    /// Finder 右键菜单配置（类型定义见 Features/RightClick/RightClickModels.swift）
+    func rightClickConfig() -> RightClickConfig {
+        queue.sync { rightClickStorage }
+    }
+
+    func setRightClickConfig(_ config: RightClickConfig) {
+        queue.sync(flags: .barrier) {
+            rightClickStorage = config
+            save()
+        }
+    }
+
     // MARK: - 软链接映射（独立功能）
 
     /// 记录一条软链接：链接路径 -> 目标路径
@@ -112,6 +154,9 @@ final class ConfigStore: @unchecked Sendable {
         var mountPoints: [String: String]
         var symLinks: [String: String]
         var menuBar: MenuBarConfig
+        // 可选：旧版 config.json 无此字段时解码为 nil，避免整体解码失败丢失其它配置
+        var scrollControl: ScrollControlConfig?
+        var rightClick: RightClickConfig?
     }
 
     private func load() {
@@ -123,13 +168,17 @@ final class ConfigStore: @unchecked Sendable {
         mountPointsStorage = parsed.mountPoints
         symLinkStorage = parsed.symLinks
         menuBarStorage = parsed.menuBar
+        if let sc = parsed.scrollControl { scrollControlStorage = sc }
+        if let rc = parsed.rightClick { rightClickStorage = rc }
     }
 
     private func save() {
         let payload = PersistedData(
             mountPoints: mountPointsStorage,
             symLinks: symLinkStorage,
-            menuBar: menuBarStorage
+            menuBar: menuBarStorage,
+            scrollControl: scrollControlStorage,
+            rightClick: rightClickStorage
         )
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? data.write(to: fileURL, options: .atomic)

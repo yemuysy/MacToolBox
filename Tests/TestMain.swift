@@ -23,6 +23,8 @@ struct TestRunner {
         HotkeyTests.run()
         BrewServiceTests.run()
         LaunchAgentServiceTests.run()
+        ScrollEventTests.run()
+        RightClickTests.run()
 
         // 异步测试：DiskCleaner（actor）
         await DiskCleanerTests.run()

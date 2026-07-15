@@ -26,6 +26,7 @@ mkdir -p "$MODULE_CACHE"
 
 # 收集源文件：排除含 @main 的应用入口（避免与测试顶层入口冲突）
 SWIFT_FILES=$(find "$SRC_DIR" -name '*.swift' ! -name 'MacToolBoxApp.swift' | sort)
+SWIFT_FILES="$SWIFT_FILES $(find Sources/Shared -name '*.swift' | sort)"
 SWIFT_FILES="$SWIFT_FILES $(find "$TEST_DIR" -name '*.swift' | sort)"
 
 echo "==> Test sources:"
@@ -45,9 +46,12 @@ swiftc \
     -framework Foundation \
     -framework DiskArbitration \
     -framework CoreFoundation \
+    -framework CoreGraphics \
+    -framework ApplicationServices \
     -framework IOKit \
     -framework OSLog \
     -framework Carbon \
+    -framework CryptoKit \
     -o "$BUILD_DIR/test_runner" \
     $SWIFT_FILES
 
