@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import OSLog
 
 // MARK: - 引擎配置快照（Sendable，安全跨线程传给 C 回调）
 
@@ -26,6 +27,8 @@ struct ScrollEngineConfig: Sendable {
 /// 故不能用 @MainActor 的 async。配置快照与 keeper 状态用 NSLock 保护。
 final class ScrollEngine: @unchecked Sendable {
     static let shared = ScrollEngine()
+
+    static let log = OSLog(subsystem: "com.yemu.mactoolbox", category: "ScrollEngine")
 
     private let lock = NSLock()
     private var config: ScrollEngineConfig = .disabled
@@ -118,8 +121,12 @@ final class ScrollEngine: @unchecked Sendable {
         }
         // 2. 触控板豁免
         if cfg.excludeTrackpad, ScrollEvent.isTrackpad(event) {
+            os_log(.debug, log: Self.log, "process: trackpad event PASSED THROUGH (exempt)")
             return Unmanaged.passUnretained(event)
         }
+
+        let fieldsBefore = ScrollEvent.dumpFields(event)
+
         // 3. 反向（对三种增量表示统一取反）
         if cfg.reverseVertical { ScrollEvent.reverseVerticalAxis(event) }
         if cfg.reverseHorizontal { ScrollEvent.reverseHorizontalAxis(event) }
@@ -128,10 +135,21 @@ final class ScrollEngine: @unchecked Sendable {
         if cfg.smooth {
             let dv = ScrollEvent.pixelDelta(event, axis1: true) * cfg.smoothSpeed
             let dh = ScrollEvent.pixelDelta(event, axis1: false) * cfg.smoothSpeed
+            os_log(.debug, log: Self.log,
+                   "process: SMOOTH consume — fields[%{public}] pixelDelta(%.1f,%.1f) speed=%.1f → enqueue(%.1f,%.1f)",
+                   fieldsBefore,
+                   ScrollEvent.pixelDelta(event, axis1: true) / (cfg.smoothSpeed > 0 ? cfg.smoothSpeed : 1),
+                   ScrollEvent.pixelDelta(event, axis1: false) / (cfg.smoothSpeed > 0 ? cfg.smoothSpeed : 1),
+                   cfg.smoothSpeed, dv, dh)
             if dv != 0 || dh != 0 {
                 ScrollPoster.shared.enqueue(deltaV: dv, deltaH: dh, step: cfg.smoothStep)
-                return nil
+                return nil  // 消费原事件，由 poster 合成回送
             }
+            os_log(.debug, log: Self.log, "process: smooth delta is zero, falling through to pass")
+        } else {
+            os_log(.debug, log: Self.log,
+                   "process: REVERSE ONLY — fields[%{public}] → passed through",
+                   fieldsBefore)
         }
         return Unmanaged.passUnretained(event)
     }
@@ -205,6 +223,7 @@ private func scrollEventTapCallback(
 ) -> Unmanaged<CGEvent>? {
     switch type {
     case .tapDisabledByTimeout, .tapDisabledByUserInput:
+        os_log(.info, log: ScrollEngine.log, "callback: tap disabled (type=%{public}@)", String(describing: type))
         ScrollEngine.shared.handleTapDisabled()
         return Unmanaged.passUnretained(event)
     case .scrollWheel:

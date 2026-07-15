@@ -7,6 +7,10 @@ import Foundation
 /// 主线程单例式访问：FIFinderSync 实例由系统在主线程创建，`menu(for:)` 与 IPC 回调均在主线程，
 /// 故可变状态无需额外隔离。类型声明为 `@unchecked Sendable` 仅为满足 Swift 6 下
 /// `@Sendable` 闭包捕获 `self` 的约束。
+/// `@objc(FinderSyncExt)` 固定 ObjC 运行时名为裸 `FinderSyncExt`，与 Info.plist 的
+/// `NSExtensionPrincipalClass` 对齐。否则 Swift 默认名为 `模块名.类名`
+/// （`FinderSyncExt.FinderSyncExt`），系统按裸名解析主类会失败，扩展无法实例化/注册。
+@objc(FinderSyncExt)
 final class FinderSyncExt: FIFinderSync, @unchecked Sendable {
 
     private var cachedMenuConfig: RCMenuConfig?

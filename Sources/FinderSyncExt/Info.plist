@@ -20,12 +20,20 @@
     <string>6.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.FinderSync</string>
         <key>NSExtensionPrincipalClass</key>
         <string>FinderSyncExt</string>
+        <key>NSExtensionAttributes</key>
+        <dict/>
     </dict>
 </dict>
 </plist>

@@ -93,13 +93,17 @@ else
     echo "    Warning: MenuBarIcon.png not found"
 fi
 
-# 8. 编译并内嵌 Finder Sync 扩展（独立 mach-o bundle）
+# 8. 编译并内嵌 Finder Sync 扩展
+#    关键：app 扩展的可执行文件必须是 MH_EXECUTE 且入口为 NSExtensionMain，
+#    绝不能用 -bundle（那会产出 MH_BUNDLE，pluginkit 拒绝注册，Finder 永远看不到菜单）。
+#    正确做法：以 -parse-as-library 编译（无 @main），用链接器 -e 指定入口 _NSExtensionMain（由 Foundation 提供）。
 echo "==> Compiling Finder Sync extension..."
 EXT_FILES=$(find "$EXT_DIR" "$SHARED_DIR" -name "*.swift" | sort)
 EXT_BIN="$BUILD_DIR/$EXT_NAME"
 swiftc \
     -sdk "$SDK_PATH" \
     -target "$ARCH-apple-macos$MIN_MACOS" \
+    -parse-as-library \
     -module-name "$EXT_NAME" \
     -swift-version 6 \
     -O \
@@ -107,7 +111,7 @@ swiftc \
     -framework AppKit \
     -framework FinderSync \
     -framework CryptoKit \
-    -Xlinker -bundle \
+    -Xlinker -e -Xlinker _NSExtensionMain \
     -o "$EXT_BIN" \
     $EXT_FILES
 
