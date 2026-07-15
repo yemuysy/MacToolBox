@@ -85,8 +85,13 @@ func rcLog(_ message: String) {
 
 /// 主程序与扩展通过 DistributedNotificationCenter 通信。
 /// 所有消息带 SHA256(payload+secret) 签名，扩展与主程序内联同一份密钥，防止其它进程伪造点击注入。
+///
+/// 注意：沙盒扩展（Finder Sync）只能发送/接收 **以 App Group 为前缀** 的通知名，
+/// 否则系统直接拦截 post。故通知名必须以 `group.com.yemu.mactoolbox.` 开头。
 struct RCMessager {
-    static let name = "com.yemu.mactoolbox.rightclick"
+    /// App Group（与主程序/扩展 entitlements 中的 `com.apple.security.application-groups` 一致）
+    static let appGroup = "group.com.yemu.mactoolbox"
+    static let name = "group.com.yemu.mactoolbox.rightclick"
     /// 主程序与扩展内联同一份密钥
     private static let secret = "MacToolBox-RClick-2026-shared-secret"
 

@@ -28,7 +28,73 @@
     <string>public.app-category.utilities</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>MacToolBox needs to send Apple events to manage disks and inspect running applications.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>MacToolBox needs to send Apple events to manage disks and inspect running applications.</string>
+
+	<!-- 右键增强（免费路线）：系统服务，无需证书、无需 Finder Sync 扩展。
+	     出现在 Finder 右键「服务」子菜单，复用主程序 RightClickActionHandlers。 -->
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：复制路径</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>copyPath</string>
+			<key>NSRequiredContext</key>
+			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：新建文件</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>newFile</string>
+			<key>NSRequiredContext</key>
+			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：用 App 打开</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>openWith</string>
+			<key>NSRequiredContext</key>
+			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：删除</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>delete</string>
+			<key>NSRequiredContext</key>
+			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：显示/隐藏</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>toggleHidden</string>
+			<key>NSRequiredContext</key>
+			<dict><key>NSTextContent</key><string>FilePath</string></dict>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -46,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 7. 右键增强：常驻监听扩展点击（无论功能是否启用，扩展仅在 config.enabled 时渲染菜单）
         RightClickService.shared.start()
 
+        // 8. 注册系统服务（免费路线右键增强：零证书，出现在 Finder 右键「服务」子菜单）
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
+
         Logger.shared.info("MacToolBox bootstrap complete, windows: \(NSApp.windows.count), app isActive: \(NSApp.isActive)")
     }
 
@@ -367,5 +371,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 切换到菜单栏-only：Dock 图标消失，应用仍在后台运行
         NSApp.setActivationPolicy(.accessory)
         Logger.shared.info("hideMainWindow: isVisible=\(window.isVisible), policy=accessory")
+    }
+
+    // MARK: - 系统服务（免费路线右键增强，Finder 右键「服务」子菜单）
+
+    /// NSServices 入口：由 Info.plist 的 `NSServices` 声明触发，`userData` 区分动作。
+    /// 零证书，复用 `RightClickActionHandlers`。
+    @objc func rightClickService(_ pboard: NSPasteboard, userData: String, error: NSErrorPointer) {
+        Task { @MainActor in
+            let urls = (pboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]) ?? []
+            let cfg = ConfigStore.shared.rightClickConfig()
+            guard cfg.enabled else {
+                rcLog("RightClick(NSServices): feature disabled, skip")
+                return
+            }
+            switch userData {
+            case "copyPath":
+                if cfg.showCopyPath { RightClickActionHandlers.copyPaths(urls) }
+            case "newFile":
+                if cfg.showNewFile { RightClickActionHandlers.createNewFile(type: cfg.newFileTypes.first, targets: urls, targetedDir: nil) }
+            case "openWith":
+                if cfg.showOpenWith, let first = cfg.openWithApps.first {
+                    RightClickActionHandlers.openWith(bundleID: first.bundleID, targets: urls)
+                }
+            case "delete":
+                if cfg.showDelete { RightClickActionHandlers.deleteDirectly(urls) }
+            case "toggleHidden":
+                if cfg.showToggleHidden { RightClickActionHandlers.toggleHidden(urls) }
+            default:
+                rcLog("RightClick(NSServices): unknown userData \(userData)")
+            }
+        }
     }
 }

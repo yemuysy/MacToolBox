@@ -17,6 +17,23 @@ EXT_NAME="FinderSyncExt"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
+# ---------------------------------------------------------------------------
+# 代码签名配置
+#   - 开发期（无证书）：留空 SIGN_IDENTITY，走 ad-hoc（Finder Sync 扩展不会被
+#     pkd 注册，但主程序/测试可正常构建）。
+#   - 分发/启用 Finder Sync 扩展：设置以下两个环境变量后重新构建：
+#       export SIGN_IDENTITY="Developer ID Application: Your Name (TEAMIDXXXX)"
+#       export TEAM_ID="TEAMIDXXXX"
+#     脚本会用该身份 + Hardened Runtime + entitlements 签名主程序与扩展，
+#     扩展因此能被系统注册并在「系统设置→扩展→Finder」中出现。
+# ---------------------------------------------------------------------------
+SIGN_IDENTITY="${SIGN_IDENTITY:-}"
+TEAM_ID="${TEAM_ID:-}"
+APP_ENTITLEMENTS_SRC="Sources/MacToolBox/MacToolBox.entitlements"
+EXT_ENTITLEMENTS_SRC="Sources/FinderSyncExt/FinderSyncExt.entitlements"
+APP_ENTITLEMENTS_TMP="$BUILD_DIR/MacToolBox.entitlements"
+EXT_ENTITLEMENTS_TMP="$BUILD_DIR/FinderSyncExt.entitlements"
+
 echo "==> Building $APP_NAME"
 echo "    Project dir: $PROJECT_DIR"
 
@@ -122,11 +139,31 @@ cp "$EXT_BIN" "$APPEX/Contents/MacOS/$EXT_NAME"
 cp "$EXT_DIR/Info.plist" "$APPEX/Contents/Info.plist"
 echo "    $EXT_NAME.appex assembled"
 
-# 9. 代码签名（开发期 ad-hoc；分发需 Developer ID）
-#    先签扩展，再签主程序（主程序签名会校验内嵌 appex 的签名）
+# 9. 代码签名
+#    分发模式（SIGN_IDENTITY 已设置）：用 Developer ID + Hardened Runtime + entitlements 签名。
+#    开发模式（未设置）：ad-hoc 签名（扩展不会被 pkd 注册，但主程序/测试可正常构建）。
+#    顺序：先签扩展，再签主程序（主程序签名封印会校验内嵌 appex 签名）。
 echo "==> Code signing..."
-codesign --force --sign - "$APPEX"
-codesign --force --sign - "$APP_BUNDLE"
+if [ -n "$SIGN_IDENTITY" ]; then
+    if [ -z "$TEAM_ID" ]; then
+        echo "    ERROR: SIGN_IDENTITY set but TEAM_ID empty. Set TEAM_ID to your 10-char Apple Team ID." >&2
+        exit 1
+    fi
+    # 准备 entitlements（替换 __TEAM_ID__ 占位符）
+    sed "s/__TEAM_ID__/$TEAM_ID/g" "$EXT_ENTITLEMENTS_SRC" > "$EXT_ENTITLEMENTS_TMP"
+    sed "s/__TEAM_ID__/$TEAM_ID/g" "$APP_ENTITLEMENTS_SRC" > "$APP_ENTITLEMENTS_TMP"
+    echo "    signing mode: Developer ID ($SIGN_IDENTITY)"
+    codesign --force --options runtime --timestamp \
+        --entitlements "$EXT_ENTITLEMENTS_TMP" \
+        --sign "$SIGN_IDENTITY" "$APPEX"
+    codesign --force --options runtime --timestamp \
+        --entitlements "$APP_ENTITLEMENTS_TMP" \
+        --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+else
+    echo "    signing mode: ad-hoc (set SIGN_IDENTITY + TEAM_ID for distribution / Finder Sync)"
+    codesign --force --sign - "$APPEX"
+    codesign --force --sign - "$APP_BUNDLE"
+fi
 echo "    signed appex + app"
 
 # 10. 完成
