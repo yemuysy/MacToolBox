@@ -1,0 +1,22 @@
+# Build output
+build/
+
+# macOS metadata
+.DS_Store
+.AppleDouble
+.AppleUpstairs
+.Spotlight-V100
+.Trashes
+
+# Xcode / editor
+*.xcuserstate
+xcuserdata/
+.vscode/
+.idea/
+
+# Logs
+*.log
+log/
+
+# Local runtime data (user-specific, never committed)
+Application Support/MacToolBox/

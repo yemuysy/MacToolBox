@@ -1,0 +1,269 @@
+# MacToolBox
+
+一款面向 Apple Silicon 的 macOS 系统工具箱，双形态运行：常驻菜单栏 + 独立主窗口。纯 SwiftUI + Swift 实现，**零第三方依赖**，且全程 **Swift 6 严格并发**（`-swift-version 6`）。
+
+![主窗口](screenshots/main_window_ui.png)
+
+## 功能
+
+底座由 9 个功能模块组成，每个都可在「功能开关」中独立启用 / 关闭（关闭后既不进侧边栏，也绝不实例化对应 Service，从源头省内存）。
+
+| 功能 ID | 名称 | 图标 | 默认 | 说明 |
+|---------|------|------|------|------|
+| `overview` | 概览（常驻核心） | `square.grid.2x2` | 常驻 | CPU/内存/磁盘/电池/机型/开机时长/**CPU 温度** 聚合 Dashboard |
+| `diskMount` | 磁盘挂载 | `externaldrive` | 开 | DiskArbitration 监听插盘，开机/插盘自动挂载指定卷 |
+| `metalHUD` | Metal HUD | `speedometer` | 开 | `launchctl setenv METAL_HUD_ENABLED` 一键开关 GPU 调试 HUD |
+| `appLaunch` | 启动监控 | `app.badge` | 开 | 实时显示每个应用启动的 PID/路径/参数 |
+| `folderMap` | 目录映射 | `link` | 开 | 软链接管理（链接路径 ↔ 目标路径） |
+| `brew` | Homebrew | `mug` | 开 | 已装/可清理/过期包查询 |
+| `cleanup` | 垃圾清理 | `trash.fill` | 开 | 按 **系统 / 应用 / 上网** 垃圾分组，默认仅选安全项，分批清理（`actor` 隔离） |
+| `launchAgent` | 启动项 | `power` | 开 | LaunchAgent/Daemon plist 解析与管理 |
+| `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件或剪贴板 |
+
+新增重点能力：
+
+- **截图**：内置区域拖选遮罩（半透明 + 挖空选区），绕过系统截图的不便。
+- **全局快捷键**：基于 Carbon `RegisterEventHotKey`，零依赖、免辅助功能权限。支持区域截图 / 全屏截图 / 窗口截图 / 切换主窗口 / 打开概览，绑定可在「设置」中录制。
+- **功能开关**：只启用需要的功能，主界面才出现对应入口；未启用功能的 Service 绝不实例化，降低常驻内存。
+- **特权扩展点**：`PrivilegedOperations` 协议 + `UserSpacePrivilegedOperations` 普通权限实现，为未来特权 Helper（深层系统清理、受保护目录删除）预留干净接口。
+
+## 技术栈
+
+- **语言**: Swift 6 严格并发（`-swift-version 6`，`@MainActor` / `actor` / `Sendable` 全程约束）
+- **UI**: SwiftUI（主面板）+ AppKit（NSStatusItem 菜单栏图标 + NSPopover + NSPanel 区域选）
+- **系统 API**: DiskArbitration, IOKit, Mach (`host_statistics64`), sysctl, NSWorkspace, Carbon (RegisterEventHotKey)
+- **构建**: 纯 `swiftc` + Command Line Tools，**不需要 Xcode**
+- **依赖**: 零第三方依赖
+- **图标**: 蓝青渐变工具箱主题图标（.icns + 菜单栏模板图标）
+
+## 架构设计
+
+重构后的代码严格分层，单一「功能真相来源」驱动整个 UI 与快捷键，**新增功能只需追加一条注册即可**。
+
+```
+MacToolBox/
+├── build.sh                              # 构建脚本（swiftc + 手动 .app bundle，含 Carbon 链接）
+├── test.sh                               # 沙盒测试（编译 Sources 排除 @main + Tests 为独立二进制）
+├── run.sh                                # 启动脚本（open/build/rebuild/stop/status/clean）
+├── Resources/
+│   ├── Info.plist                        # LSUIElement=false（显示 Dock）
+│   ├── AppIcon.icns / MenuBarIcon.png
+│   └── IconMaster.png                    # 图标母版
+├── Sources/MacToolBox/
+│   ├── App/                              # 应用外壳层（@main 入口 + 委托 + 窗口/面板/设置）
+│   │   ├── MacToolBoxApp.swift           # @main 入口（仅创建 AppDelegate）
+│   │   ├── AppDelegate.swift             # NSApplicationDelegate；窗口/面板/快捷键生命周期
+│   │   ├── MenuBarRootView.swift         # 主窗口根视图：侧边栏导航（由 FeatureManager 驱动）
+│   │   ├── MenuBarPanelView.swift        # 菜单栏弹出面板（核心指标 + 快捷操作网格）
+│   │   └── SettingsView.swift            # 设置：功能开关 + 全局快捷键录制 UI
+│   ├── Core/                             # 核心层（与具体功能解耦的引擎）
+│   │   ├── FeatureID.swift               # 功能枚举（CaseIterable 单一真相）
+│   │   ├── FeatureManager.swift          # 功能注册表 + 启用解析 + 惰性实例化控制
+│   │   ├── Hotkey.swift                  # 快捷键模型（Carbon 掩码 / Codable / 显示串）
+│   │   ├── HotkeyService.swift           # 全局快捷键服务（RegisterEventHotKey 注册/分发）
+│   │   └── PrivilegedOperations.swift   # 特权操作协议 + 普通权限实现（Helper 扩展点）
+│   ├── Features/                         # 功能层（每个功能一个目录，含 Service + View）
+│   │   ├── Overview/      OverviewView.swift
+│   │   ├── DiskMount/     DiskMountService.swift  + DiskMountView.swift
+│   │   ├── MetalHUD/      MetalHUDService.swift   + MetalHUDView.swift
+│   │   ├── AppLaunch/     AppLaunchMonitorService.swift + AppLaunchMonitorView.swift + AppLaunchRecord.swift
+│   │   ├── FolderMap/     FolderMapService.swift  + FolderMapView.swift
+│   │   ├── Brew/          BrewService.swift       + BrewView.swift
+│   │   ├── Cleanup/       DiskCleaner.swift(actor) + CleanupClassifier + CleanupService.swift + CleanupView.swift
+│   │   ├── LaunchAgent/   LaunchAgentService.swift + LaunchAgentView.swift
+│   │   └── Screenshot/    ScreenshotEngine.swift  + RegionSelector.swift + ScreenshotView.swift
+│   ├── Services/                          # 跨功能的共享服务
+│   │   └── SystemInfoService.swift        # mach + sysctl + ioreg + SMC 温度（@Published 快照：平均 + 最热核心，后台读取）
+│   ├── Shared/                           # 跨功能共享 UI
+│   │   ├── Components.swift               # 主题/卡片/标签栏/进度条/格式化器
+│   │   └── Sparkline.swift                # 迷你趋势图
+│   └── Utilities/                        # 基础设施
+│       ├── ConfigStore.swift              # JSON 持久化（config.json + 独立 features.json）
+│       ├── Logger.swift                   # OSLog
+│       ├── ShellExecutor.swift            # Process 封装
+│       └── SMCReader.swift                # Apple Silicon SMC 温度读取（移植自 Stats）
+└── Tests/                                # 沙盒测试层（每个功能一个测试，纯逻辑可单测）
+    ├── TestMain.swift                     # @main 测试入口（同步 + 异步 actor 汇总）
+    ├── ScreenshotEngineTests.swift        # clampRegion / buildFilename / pngData
+    ├── HotkeyTests.swift                  # Hotkey Codable / displayString / from(cocoa:)
+    ├── BrewServiceTests.swift            # parseByteSize 字节解析
+    ├── LaunchAgentServiceTests.swift      # parsePlistFile plist 解析
+    └── DiskCleanerTests.swift            # 扫描 / 删除 / 白名单保护（actor async）
+```
+
+### 分层职责
+
+| 层 | 职责 | 关键约束 |
+|----|------|----------|
+| **App 外壳层** | 进程生命周期、窗口/面板、委托、设置入口 | `@main` 仅含入口；其余逻辑在 `AppDelegate` 便于测试排除 |
+| **Core 核心层** | 功能注册表、快捷键、特权扩展点 —— 与具体 UI 解耦 | 单一「功能真相来源」驱动侧边栏/面板/快捷键 |
+| **Features 功能层** | 每个功能的 Service（业务逻辑）+ View（UI） | Service 仅在功能被启用且用户切到该 Tab 时实例化（惰性）；清理功能内嵌分类规则引擎 |
+| **Services 共享服务** | 跨功能的系统数据（系统信息、温度） | 发布者模式，UI 订阅不各自轮询 |
+| **Shared / Utilities** | 共享 UI 组件、格式化、持久化、日志、Shell、SMC | `ConfigStore` 线程安全（`@unchecked Sendable` + barrier 队列） |
+
+### 功能开关工作机制（省内存核心）
+
+1. `FeatureID` 枚举列出全部功能，是唯一的「功能真相来源」。
+2. `FeatureManager.buildDefinitions()` 注册每个功能的元数据 + `makeContent` 视图工厂。
+3. 启动时对非核心功能做 `resolveEnabled`：若 `features.json` 已配置则按其存储；否则按 `defaultEnabled`。
+4. **侧边栏、菜单栏面板、快捷键**全部由 `FeatureManager.enabledDefinitions` 驱动 —— 未启用功能既不在 UI 出现，其 `makeContent()` 也绝不被调用，故对应 Service 不会被实例化。
+5. 用户在「设置 → 功能开关」切换后，`setEnabled` 立即持久化到 `features.json`；核心功能（概览）不可关闭。
+
+### 全局快捷键
+
+- `Hotkey.swift`：模型化快捷键（keyCode + Carbon 修饰符掩码），`Codable` 持久化，`displayString` 显示。
+- `HotkeyService.swift`：`RegisterEventHotKey` 注册全部绑定；按键事件经 `InstallEventHandler` 派发到主线程 `fire(_:)`。
+- 支持动作：`regionScreenshot` / `fullScreenshot` / `windowScreenshot` / `toggleMainWindow` / `openOverview`，各有默认绑定，可在设置中重新录制。
+- 无需辅助功能权限（Carbon 全局热键走系统事件，区别于 Accessibility API）。
+
+### 特权扩展点
+
+`Core/PrivilegedOperations.swift` 定义协议 `PrivilegedOperations`（`removeItem` / `moveItem`，带越权保护），当前由 `UserSpacePrivilegedOperations`（仅用户可写区域）实现。未来接入特权 Helper（SMJobBless / LaunchDaemon）时，只需提供一个遵守该协议、内部走 XPC 的实现，**上层调用方代码零改动**。
+
+## 快速开始
+
+```bash
+# 第一次运行（编译 + 启动）
+./run.sh open
+
+# 其他命令
+./run.sh build       # 仅编译
+./run.sh rebuild     # 重新编译并启动
+./run.sh stop        # 关闭 App
+./run.sh status      # 查看是否在运行
+./run.sh clean       # 清理 build 目录
+
+# 运行沙盒测试（编译 Sources 排除 @main + Tests，独立二进制运行）
+./test.sh
+```
+
+启动后会在屏幕顶部菜单栏看到一个工具箱图标，点击展开核心指标面板；同时 Dock 上也会出现应用图标，点击可打开侧边栏主窗口。配置入口在「设置」（菜单栏右键「设置…」或快捷键），可开关功能、录制快捷键。
+
+## 双形态运行
+
+- **菜单栏**: 点击工具箱图标弹出 popover（紧凑面板），展示核心指标 + 快捷操作网格（仅已启用功能）。
+- **主窗口**: 标准 NSWindow，左侧图标侧边栏导航（由 FeatureManager 驱动，仅已启用功能）。关闭后 App 仍常驻。
+- **设置**: 功能开关（逐项启用/关闭）+ 全局快捷键（录制绑定）。
+- **Dock 图标**: 点击 Dock 图标可重新打开主窗口（落到概览或上次功能）。
+- **退出**: 菜单栏右键「退出 MacToolBox」或 Cmd+Q。
+
+## 内存占用
+
+| 指标 | 数值 |
+|------|------|
+| 二进制大小 | ~800 KB |
+| .app bundle | ~3.9 MB（含图标） |
+| 运行时内存（RSS） | 130-145 MB |
+| 启动时间 | < 1 秒 |
+
+### 内存与性能优化措施
+
+- **功能开关驱动惰性实例化**：未启用功能的 Service 绝不创建（不在侧边栏、不进 `makeContent()`）。
+- **延迟启动后台服务**：`DiskMountService`、`AppLaunchMonitorService`、`BrewService` 仅在首次进入对应 Tab（`onAppear`）时才初始化。
+- **消除冗余 Timer**：菜单栏标题订阅 `SystemInfoService.$snapshot` 发布者；面板/设置预览依赖 SwiftUI 状态，删除独立轮询 Timer。
+- **温度读取移出主线程 + 合并监控**：原 `TemperatureMonitor` 孤儿 1Hz 轮询已合并进 `SystemInfoService`；SMC 内核调用（含 `usleep` 重试）在专属串行队列执行，彻底消除主线程阻塞。快照一次性提供「平均 + 最热核心」温度，避免重复读取。
+- **主线程阻塞消除**：应用启动监控的 `ps` 取参、Metal HUD 的 `setsid` 启动拉起、文件夹映射 `init` 的磁盘 I/O 全部移到后台队列，主线程零等待。
+- **子进程开销削减**：磁盘列表改为一次 `diskutil list -plist` 枚举所有卷后再逐个取详情（跳过物理盘 / 容器 / 系统卷）；Homebrew 动作后的局部刷新跳过耗时的 `brew cleanup -n --prune=all` 干跑，复用上次估算值。
+- **重复分配与重渲染消除**：`Sparkline` 每帧只计算一次几何点（面积与折线共用）；截图缩略图在创建时解码一次并缓存，不再每次渲染从磁盘重新解码；`ByteCountFormatter` / `DateFormatter` 统一为静态共享实例；快捷键变更只重渲染快捷键卡片而非整页。
+- **温度读取降频**：SMC 内核调用 5s 一次（EMA 平滑），主轮询 2s 处理 CPU/内存/网络/磁盘。
+
+参考对比：Chrome 单标签页 100-200MB，VSCode 1GB+。
+
+## 工作原理
+
+### 菜单栏图标
+
+经典 `NSStatusBar.statusItem` + `NSPopover` + `NSHostingController` 组合，加载自定义模板图标。点击展开面板；完整功能从面板或 Dock 打开主窗口。
+
+### 垃圾清理
+
+- **分类规则引擎**：`DiskCleaner` 扫描白名单目录（`~/Library/Caches`、`~/Library/Logs`、`NSTemporaryDirectory()`）时，通过 `CleanupClassifier` 按路径识别每条垃圾的类别：
+  - **系统垃圾**：`Logs` / `tmp` / 系统临时目录（日志、临时文件）。
+  - **应用垃圾**：`Caches` 下非浏览器应用（如 QQ、微信、VSCode、网易云音乐）。
+  - **上网垃圾**：`Caches` 下浏览器（Safari、Chrome、Firefox、Edge、夸克、QQ浏览器 等）。
+- **按应用聚合 UI**：扫描结束后按「类别 × 应用」聚合为 `CleanupGroup`，界面先展示大类（系统/应用/上网），每类下再列出「应用行」，每个应用一个三态复选框，点一下即整组勾选/清理。可选项从「每个文件」收敛到「每个应用」（通常几十行），从根本上消除选择卡顿。
+- **默认安全选中**：扫描结束后仅自动勾选 `risk == .safe` 的项；谨慎项（如用户日志）默认不选，防止误删。选中总字节数由预构建的 `sizeByURL` 字典计算，复杂度从 O(N²) 降到 O(N)。
+- **分批清理**：`CleanupService.clean` 把选中项按 `chunkSize = 50` 分批次交给 `DiskCleaner.delete`，每批之间 `Task.yield()` 让出事件循环，避免一次性大量文件操作阻塞 UI。
+- **白名单保护**：任何不在 `allowedRoots` 前缀下的路径都不扫描、不删除，误点「全选」也不会越界。
+
+### 磁盘自动挂载
+
+`DiskArbitration.framework` 的 `DARegisterDiskAppearedCallback` 监听磁盘物理插入；`diskutil mount` 完成挂载。配置持久化在 `Application Support/MacToolBox/config.json`。
+
+### Metal HUD 开关
+
+```bash
+launchctl setenv METAL_HUD_ENABLED 1     # 开启
+launchctl unsetenv METAL_HUD_ENABLED     # 关闭
+```
+
+> 仅对新启动的应用生效，已运行的应用需重启。
+
+### 应用启动监控
+
+`NSWorkspace.didLaunchApplicationNotification` 接收启动事件；`ps eww -p <pid>` 读取参数。非 root 进程读取其他进程环境变量可能受限（macOS SIP）。
+
+### 截图
+
+- 全屏 / 窗口：`/usr/sbin/screencapture -x`（`-w` 拾取窗口）。
+- 区域拖选：自定义 `NSPanel` + `NSView` 半透明遮罩，拖拽出选区（destinationOut 挖空），Esc 取消，回调 `CGRect` 后交给 `screencapture -R`。
+- 纯函数 `clampRegion` / `buildFilename` / `pngData` 可独立单测。
+- 保存位置可选「文件」或「剪贴板」。
+
+### 全局快捷键
+
+Carbon `RegisterEventHotKey` 在 `HotkeyService` 内注册；系统按键事件经 `InstallEventHandler` 捕获并 `DispatchQueue.main.async` 派发到对应动作（截图 / 切换窗口 / 打开概览）。绑定持久化在 `features.json`。
+
+### CPU 温度读取（Apple Silicon）
+
+来自 Apple SMC，实现见 `Utilities/SMCReader.swift`：
+
+- **无需特权**：Apple Silicon 普通用户进程即可经 `AppleSMC` 读取温度键（移植自 [Stats](https://github.com/exelban/stats) 的 `SMC/smc.swift`，精确 `SMCKeyData_t` 布局 + selector=2 两步读协议）。
+- **多核心平均**：取一组核心 die 温度传感器（`Tp*/Tc*/Te*/Tg*`）有效读数求平均，过滤电源门控占位假值（idle 时某些核心读出 ~5°C）。
+- **最热核心 + 平均**：`SystemInfoService.snapshot` 同时提供 `temperature`（多核心平均，EMA 平滑）与 `temperatureHottest`（最热核心），概览页一并展示；温度读取在后台串行队列完成，**不阻塞主线程**。
+- **时间平滑**：`SystemInfoService` 内 EMA（系数 0.3）抹平抖动；读不到时保留上一帧，UI 不闪「—」。
+- 详细原理见 **[Docs/Temperature-SMC.md](Docs/Temperature-SMC.md)**。
+
+## 系统要求
+
+- **最低 macOS**: 13.0 (Ventura)
+- **架构**: Apple Silicon (arm64)
+- **构建工具**: Command Line Tools 即可，不需要 Xcode
+- **权限**: 不需要辅助功能权限（全局快捷键走 Carbon 热键，非 Accessibility）
+  - 磁盘挂载需要管理员授权（首次弹窗）
+  - 读取其他进程环境变量可能受 SIP 部分限制
+  - CPU 温度读取为普通用户态 SMC 访问，无需 root / 特权 helper
+
+## 沙盒测试
+
+`test.sh` 把 `Sources`（排除含 `@main` 的 `MacToolBoxApp.swift`，避免与测试入口冲突）与 `Tests/` 一起编译为独立二进制 `build/test/test_runner` 并运行。每个功能模块都有对应纯逻辑 / 沙盒测试：
+
+| 测试 | 覆盖 |
+|------|------|
+| `ScreenshotEngineTests` | 区域裁剪 `clampRegion`、文件名 `buildFilename`、PNG 编码 `pngData` |
+| `HotkeyTests` | `Hotkey` Codable 往返、显示串 `displayString`、`from(cocoa:)` 掩码转换 |
+| `BrewServiceTests` | 字节大小 `parseByteSize` 解析 |
+| `LaunchAgentServiceTests` | `parsePlistFile` plist 解析（启用/禁用项） |
+| `DiskCleanerTests` |（`actor` async）扫描 / 删除 / 白名单越权保护 / **分类规则** / **默认选择** / **分批清理** |
+
+测试不依赖真实 UI 或特权：纯函数直接断言；`DiskCleaner` 经 `init(allowedRoots:)` 注入沙盒目录，删除越权路径被安全拒绝。全部通过时输出 `✅ ALL TESTS PASSED`。
+
+## 已知限制
+
+1. **没有签名**: 首次运行需在「系统设置 → 隐私与安全」中允许。
+2. **没有自动更新**: 需手动 `./run.sh rebuild`。
+3. **状态保存**: 挂载规则、Metal HUD、菜单栏配置、功能开关、快捷键绑定均持久化；其余为临时数据。
+4. **主窗口位置**: 默认居中，多显示器下可能出现在上次关闭的显示器。
+5. **特权 Helper**: 当前为普通权限实现，深层系统清理 / 受保护目录删除的 Helper 骨架尚未实装（已预留 `PrivilegedOperations` 接口）。
+
+## 后续计划
+
+- Apple Developer 签名 + Notarize
+- Sparkle 自动更新
+- 特权 Helper 骨架（SMJobBless / LaunchDaemon + XPC），接入 `PrivilegedOperations`
+- 清理筛选规则增强（按类型/年龄/体积）
+- 网络测速 / 屏幕保持唤醒
+
+## License
+
+本项目基于 [MIT License](LICENSE) 开源。详见 [LICENSE](LICENSE)。
