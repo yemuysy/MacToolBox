@@ -366,7 +366,7 @@ private final class SelectionView: NSView {
             }
         }
 
-        if let handle = activeHandle {
+        if activeHandle != nil {
             activeHandle = nil
             needsDisplay = true
             return

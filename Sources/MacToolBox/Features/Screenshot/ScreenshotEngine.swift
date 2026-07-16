@@ -102,7 +102,7 @@ struct ScreenshotEngine {
     static func checkScreenRecordingPermission() -> Bool {
         // CGDisplayStream 在有权限时返回非 nil，无权限时返回 nil
         let stream = CGDisplayStream(
-            display: CGMainDisplayID(),
+            dispatchQueueDisplay: CGMainDisplayID(),
             outputWidth: 1,
             outputHeight: 1,
             pixelFormat: Int32(kCVPixelFormatType_32BGRA),
@@ -143,8 +143,6 @@ struct ScreenshotEngine {
         }
         // 通过 NSImage 写为 object，兼容「粘贴」和 NSImageView 等场景
         pb.writeObjects([image])
-        // 确保数据已刷新到共享剪贴板
-        pb.flush()
         return .success(nil)
     }
 
