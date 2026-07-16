@@ -117,12 +117,12 @@ final class FeatureManager: ObservableObject {
 
             FeatureDefinition(
                 id: .cleanup, title: "垃圾清理", icon: "trash.fill",
-                isCore: false, defaultEnabled: true
+                isCore: false, defaultEnabled: false
             ) { AnyView(CleanupView()) },
 
             FeatureDefinition(
                 id: .launchAgent, title: "启动项", icon: "power",
-                isCore: false, defaultEnabled: true
+                isCore: false, defaultEnabled: false
             ) { AnyView(LaunchAgentView()) },
 
             FeatureDefinition(
@@ -132,7 +132,7 @@ final class FeatureManager: ObservableObject {
 
             FeatureDefinition(
                 id: .scrollControl, title: "滚轮控制", icon: "computermouse",
-                isCore: false, defaultEnabled: false
+                isCore: false, defaultEnabled: true
             ) { AnyView(ScrollControlView().onAppear { ScrollControlService.shared.refreshPermission() }) },
 
             FeatureDefinition(

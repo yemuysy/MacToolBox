@@ -16,8 +16,8 @@
 | `appLaunch` | 启动监控 | `app.badge` | 开 | 实时显示每个应用启动的 PID/路径/参数 |
 | `folderMap` | 目录映射 | `link` | 开 | 软链接管理（链接路径 ↔ 目标路径） |
 | `brew` | Homebrew | `mug` | 开 | 已装/可清理/过期包查询 |
-| `cleanup` | 垃圾清理 | `trash.fill` | 开 | 按 **系统 / 应用 / 上网** 垃圾分组，默认仅选安全项，分批清理（`actor` 隔离） |
-| `launchAgent` | 启动项 | `power` | 开 | LaunchAgent/Daemon plist 解析与管理 |
+| `cleanup` | 垃圾清理 | `trash.fill` | 关 | 按 **系统 / 应用 / 上网** 垃圾分组，默认仅选安全项，分批清理（`actor` 隔离） |
+| `launchAgent` | 启动项 | `power` | 关 | LaunchAgent/Daemon plist 解析与管理 |
 | `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件或剪贴板 |
 | `scrollControl` | 滚轮控制 | `computermouse` | 关 | 鼠标滚轮反向 + 平滑滚动，触控板豁免 |
 | `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单：新建文件 / 复制路径 / 用 App 打开 / 删除 / 隐藏 / 常用目录 |
