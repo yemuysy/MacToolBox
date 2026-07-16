@@ -267,10 +267,10 @@ struct ScreenshotView: View {
                 }
             }
         } else {
-            // 进入标注编辑器，busy 由编辑器接管
-            ScreenshotFlow.start(mode: mode, pin: false, autoSaveDir: nil) { _ in }
+            // 进入选区 → 浮动工具条（完成/保存/复制/取消）→ 编辑器
+            ScreenshotFlow.start(mode: mode, pin: false, autoSaveDir: saveDir) { _ in }
             isBusy = false
-            status = "截图编辑中…"
+            status = "框选区域后，用选区下方的工具条完成 / 保存 / 复制"
         }
     }
 }

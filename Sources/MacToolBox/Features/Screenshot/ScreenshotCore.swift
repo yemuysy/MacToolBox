@@ -64,7 +64,7 @@ enum ScreenshotFlow {
             print("MacToolBox: 无屏幕录制权限，无法截图")
             return
         }
-        CaptureSession.run(mode: mode) { result in
+        CaptureSession.run(mode: mode, defaultSaveDir: autoSaveDir) { result in
             guard let result else { return }
             if pin {
                 PinManager.shared.pin(result.image)

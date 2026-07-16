@@ -84,6 +84,50 @@ final class SelectionView: NSView {
     private let handleSize: CGFloat = 9
     private let handleHit: CGFloat = 12
 
+    // 选区确认浮动工具条（完成 / 保存 / 复制 / 取消）
+    private lazy var confirmBar: NSView = {
+        let bar = NSView()
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        bar.layer?.cornerRadius = 9
+        bar.layer?.borderWidth = 1
+        bar.layer?.borderColor = NSColor.separatorColor.cgColor
+        bar.isHidden = true
+        let items: [(String, String, Selector)] = [
+            ("完成", "checkmark.circle.fill", #selector(actFinish)),
+            ("保存", "square.and.arrow.down", #selector(actSave)),
+            ("复制", "doc.on.doc", #selector(actCopy)),
+            ("取消", "xmark.circle", #selector(actCancel)),
+        ]
+        let stack = NSStackView()
+        stack.spacing = 4
+        for (title, sym, sel) in items {
+            let b = NSButton(title: title,
+                             image: NSImage(systemSymbolName: sym, accessibilityDescription: nil)!,
+                             target: self, action: sel)
+            b.bezelStyle = .rounded
+            b.font = NSFont.systemFont(ofSize: 12)
+            b.imagePosition = .imageLeading
+            stack.addArrangedSubview(b)
+        }
+        bar.addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 6),
+            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -6),
+            stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -4),
+        ])
+        return bar
+    }()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        addSubview(confirmBar)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -96,6 +140,11 @@ final class SelectionView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        hideConfirmBar()
+        if event.clickCount == 2, state == .selected, let r = rect, r.contains(p) {
+            delegate?.selectionDidComplete(rect: r, isWindow: false)
+            return
+        }
         if state == .idle, let hov = hoverRect {
             pendingWindow = hov
             origin = p; start = p
@@ -152,15 +201,17 @@ final class SelectionView: NSView {
                 return
             }
             guard let r = rect, r.width >= 5, r.height >= 5 else {
-                rect = nil; state = .idle; drag = .none; needsDisplay = true
+                rect = nil; state = .idle; drag = .none; hideConfirmBar(); needsDisplay = true
                 delegate?.selectionCancelled()
                 return
             }
             state = .selected; drag = .none
-            delegate?.selectionDidComplete(rect: r, isWindow: false)
+            showConfirmBar(for: r)
+            needsDisplay = true
         case .move, .resize:
-            if let r = rect { delegate?.selectionDidComplete(rect: r, isWindow: false) }
             drag = .none
+            if let r = rect { showConfirmBar(for: r) }
+            needsDisplay = true
         case .none: break
         }
     }
@@ -312,6 +363,54 @@ final class SelectionView: NSView {
         return NSRect(x: min(minX, maxX), y: min(minY, maxY),
                       width: abs(maxX - minX), height: abs(maxY - minY))
     }
+
+    // MARK: - 确认工具条
+
+    private func showConfirmBar(for r: NSRect) {
+        confirmBar.isHidden = false
+        layoutConfirmBar(for: r)
+    }
+    private func hideConfirmBar() {
+        confirmBar.isHidden = true
+    }
+    private func layoutConfirmBar(for r: NSRect) {
+        let bw: CGFloat = 240
+        let bh: CGFloat = 36
+        var x = r.midX - bw / 2
+        var y = r.maxY + 8                       // flipped 坐标系：下方即 y 增大
+        x = min(max(x, 6), bounds.width - bw - 6)
+        if y + bh > bounds.height - 6 { y = r.minY - bh - 8 }   // 下方空间不足则翻到上方
+        if y < 6 { y = 6 }
+        confirmBar.frame = NSRect(x: x, y: y, width: bw, height: bh)
+    }
+
+    @objc private func actFinish() {
+        guard let r = rect, state == .selected else { return }
+        hideConfirmBar()
+        delegate?.selectionDidComplete(rect: r, isWindow: false)
+    }
+    @objc private func actSave() {
+        guard let r = rect, state == .selected else { return }
+        hideConfirmBar()
+        delegate?.selectionDidSave(rect: r)
+    }
+    @objc private func actCopy() {
+        guard let r = rect, state == .selected else { return }
+        hideConfirmBar()
+        delegate?.selectionDidCopy(rect: r)
+    }
+    @objc private func actCancel() {
+        hideConfirmBar()
+        delegate?.selectionCancelled()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if state == .selected {
+            if event.keyCode == 36 { actFinish(); return }   // Return → 完成
+            if event.keyCode == 53 { actCancel(); return }   // Esc → 取消
+        }
+        super.keyDown(with: event)
+    }
 }
 
 // MARK: - 选区代理
@@ -320,6 +419,8 @@ final class SelectionView: NSView {
     func selectionDidStart()
     func selectionDidChange(rect: NSRect)
     func selectionDidComplete(rect: NSRect, isWindow: Bool)
+    func selectionDidSave(rect: NSRect)
+    func selectionDidCopy(rect: NSRect)
     func selectionCancelled()
 }
 
@@ -358,7 +459,8 @@ final class OverlayWindow: NSWindow {
 @MainActor final class CaptureSession {
     /// 开始一次截图捕获。
     /// - mode: .region/.window 显示叠层（含窗口吸附，单击窗口即捕）；.full 直接截取光标所在屏。
-    static func run(mode: CaptureMode = .region, completion: @escaping (CaptureResult?) -> Void) {
+    static func run(mode: CaptureMode = .region, defaultSaveDir: URL? = nil,
+                    completion: @escaping (CaptureResult?) -> Void) {
         guard checkScreenRecordingPermission() else {
             completion(nil); return
         }
@@ -378,10 +480,12 @@ final class OverlayWindow: NSWindow {
 
         let state = SessionState()
         for o in overlays {
-            let delegate = Delegate(overlay: o, overlays: overlays, state: state, completion: completion)
+            let delegate = Delegate(overlay: o, overlays: overlays, state: state,
+                                    defaultSaveDir: defaultSaveDir, completion: completion)
             o.selectionView.delegate = delegate
             o.beginDetection()
             o.makeKeyAndOrderFront(nil)
+            o.makeFirstResponder(o.selectionView)
         }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -447,9 +551,12 @@ final class OverlayWindow: NSWindow {
         let overlays: [OverlayWindow]
         let state: SessionState
         let completion: (CaptureResult?) -> Void
+        let defaultSaveDir: URL?
         init(overlay: OverlayWindow, overlays: [OverlayWindow], state: SessionState,
+             defaultSaveDir: URL? = nil,
              completion: @escaping (CaptureResult?) -> Void) {
-            self.overlay = overlay; self.overlays = overlays; self.state = state; self.completion = completion
+            self.overlay = overlay; self.overlays = overlays; self.state = state
+            self.defaultSaveDir = defaultSaveDir; self.completion = completion
         }
         func selectionDidStart() {}
         func selectionDidChange(rect: NSRect) {}
@@ -467,6 +574,32 @@ final class OverlayWindow: NSWindow {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
+            completion(nil)
+        }
+
+        func selectionDidSave(rect: NSRect) {
+            guard !state.finished else { return }
+            state.finished = true
+            for o in overlays { o.orderOut(nil) }
+            if let img = overlay.screenCtx.crop(rect) {
+                let dir = defaultSaveDir
+                    ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+                    ?? URL(fileURLWithPath: NSHomeDirectory())
+                let url = dir.appendingPathComponent(ScreenshotFlow.buildFilename())
+                _ = ScreenshotFlow.savePNG(img, to: url)
+            }
+            completion(nil)
+        }
+
+        func selectionDidCopy(rect: NSRect) {
+            guard !state.finished else { return }
+            state.finished = true
+            for o in overlays { o.orderOut(nil) }
+            if let img = overlay.screenCtx.crop(rect) {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.writeObjects([img])
+            }
             completion(nil)
         }
     }

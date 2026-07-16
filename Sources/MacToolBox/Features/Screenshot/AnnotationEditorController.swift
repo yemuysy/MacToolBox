@@ -11,8 +11,13 @@ final class AnnotationEditorController: NSWindowController {
     private let widthSegments = NSSegmentedControl()
     private let statusLabel = NSTextField(labelWithString: "")
 
+    /// 强引用集合：窗口在屏幕上期间保留控制器，避免按钮 target 变野指针导致无法操作
+    /// （否则 `edit` 返回的局部控制器被 ARC 释放，窗口虽显示但「复制/保存/贴图」全部失效）。
+    private static var retainedEditors: [AnnotationEditorController] = []
+
     static func edit(_ image: NSImage) {
         let c = AnnotationEditorController()
+        retainedEditors.append(c)
         c.show(image: image)
     }
 
@@ -56,6 +61,12 @@ final class AnnotationEditorController: NSWindowController {
         win.center()
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: win, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                Self.retainedEditors.removeAll { $0 === self }
+            }
+        }
         refreshToolbarState()
     }
 
