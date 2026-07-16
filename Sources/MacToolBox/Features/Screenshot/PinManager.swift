@@ -99,18 +99,23 @@ final class PinImageView: NSView {
     }
 
     private var dragging = false
+    private var dragStartMouse: NSPoint = .zero
+    private var dragStartOrigin: NSPoint = .zero
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         dragging = true
+        // 记录起点（均用 Cocoa 屏幕坐标，y 向上），避免 deltaY 符号陷阱
+        dragStartMouse = NSEvent.mouseLocation
+        dragStartOrigin = window?.frame.origin ?? .zero
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard dragging, let win = pinWindow else { return }
-        var f = win.frame
-        f.origin.x += event.deltaX
-        f.origin.y += event.deltaY
-        win.setFrameOrigin(f.origin)
+        let cur = NSEvent.mouseLocation
+        let dx = cur.x - dragStartMouse.x
+        let dy = cur.y - dragStartMouse.y
+        win.setFrameOrigin(NSPoint(x: dragStartOrigin.x + dx, y: dragStartOrigin.y + dy))
     }
 
     override func mouseUp(with event: NSEvent) {

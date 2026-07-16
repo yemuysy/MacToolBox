@@ -267,12 +267,17 @@ final class SelectionView: NSView {
         // 背景快照（已垂直翻转绘制）
         drawBackground(ctx: ctx, sctx: sctx)
 
-        if state == .idle, let h = hoverRect {
-            dimAndCutout(ctx: ctx, cutout: h)
-            ctx.setStrokeColor(accent.cgColor)
-            ctx.setLineWidth(3)
-            ctx.stroke(h.insetBy(dx: -1.5, dy: -1.5))
-            drawLabel(ctx: ctx, rect: h)
+        if state == .idle {
+            if let h = hoverRect {
+                dimAndCutout(ctx: ctx, cutout: h)
+                ctx.setStrokeColor(accent.cgColor)
+                ctx.setLineWidth(3)
+                ctx.stroke(h.insetBy(dx: -1.5, dy: -1.5))
+                drawLabel(ctx: ctx, rect: h)
+            } else {
+                // 进入截图但未框选：整屏蒙版，提示已进入截图模式
+                dimWhole(ctx: ctx)
+            }
             return
         }
 
@@ -303,6 +308,12 @@ final class SelectionView: NSView {
         ctx.setFillColor(NSColor.black.withAlphaComponent(dim).cgColor)
         ctx.addPath(path)
         ctx.fillPath(using: .evenOdd)
+    }
+
+    /// 整屏蒙版（无挖洞），用于 idle 态提示已进入截图。
+    private func dimWhole(ctx: CGContext) {
+        ctx.setFillColor(NSColor.black.withAlphaComponent(dim).cgColor)
+        ctx.fill(bounds)
     }
 
     private func drawHandles(ctx: CGContext, rect: NSRect) {
@@ -481,6 +492,9 @@ final class OverlayWindow: NSWindow {
 // MARK: - 捕获会话
 
 @MainActor final class CaptureSession {
+    /// 是否已有截图会话进行中（防止重复触发快捷键叠加多层叠层）。
+    private static var isCapturing = false
+
     /// 开始一次截图捕获。
     /// - mode: .region/.window 显示叠层（含窗口吸附，单击窗口即捕）；.full 直接截取光标所在屏。
     /// - pin: true 时区域/窗口模式选中即直接贴图（不弹确认工具条）。
@@ -489,8 +503,16 @@ final class OverlayWindow: NSWindow {
         guard checkScreenRecordingPermission() else {
             completion(nil); return
         }
+        guard !isCapturing else {
+            // 已有截图会话进行中，忽略重复触发
+            completion(nil); return
+        }
         if mode == .full {
-            captureFull(completion: completion)
+            isCapturing = true
+            captureFull { result in
+                isCapturing = false
+                completion(result)
+            }
             return
         }
         let primaryHeight = NSScreen.screens[0].frame.height
@@ -504,6 +526,7 @@ final class OverlayWindow: NSWindow {
         guard !overlays.isEmpty else { completion(nil); return }
 
         let state = SessionState()
+        isCapturing = true
         for o in overlays {
             let delegate = Delegate(overlay: o, overlays: overlays, state: state,
                                     defaultSaveDir: defaultSaveDir, pin: pin, completion: completion)
@@ -554,6 +577,7 @@ final class OverlayWindow: NSWindow {
     private static var retainedDelegates: [Delegate] = []
     private static func release(state: SessionState) {
         retainedDelegates.removeAll { $0.state === state }
+        isCapturing = false
     }
 
     /// 跨叠层共享的「已结束」标记，避免多屏误触发多次完成。
