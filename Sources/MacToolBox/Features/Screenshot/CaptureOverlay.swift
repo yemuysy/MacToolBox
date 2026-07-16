@@ -105,6 +105,7 @@ final class SelectionView: NSView {
         let items: [(String, String, Selector)] = [
             ("保存", "square.and.arrow.down", #selector(actSave)),
             ("复制", "doc.on.doc", #selector(actCopy)),
+            ("贴图", "pin.fill", #selector(actPin)),
             ("取消", "xmark.circle", #selector(actCancel)),
         ]
         let stack = NSStackView()
@@ -392,7 +393,7 @@ final class SelectionView: NSView {
         }
     }
     private func layoutConfirmBar(for r: NSRect) {
-        let bw: CGFloat = 240
+        let bw: CGFloat = 300
         let bh: CGFloat = 36
         var x = r.midX - bw / 2
         var y = r.maxY + 8                       // flipped 坐标系：下方即 y 增大
@@ -416,6 +417,11 @@ final class SelectionView: NSView {
         hideConfirmBar()
         delegate?.selectionCancelled()
     }
+    @objc private func actPin() {
+        guard let r = rect, state == .selected else { return }
+        hideConfirmBar()
+        delegate?.selectionDidPin(rect: r)
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { actCancel(); return }                          // Esc → 取消（任意状态）
@@ -435,6 +441,7 @@ final class SelectionView: NSView {
     func selectionDidChange(rect: NSRect)
     func selectionDidSave(rect: NSRect)
     func selectionDidCopy(rect: NSRect)
+    func selectionDidPin(rect: NSRect)
     func selectionCancelled()
 }
 
@@ -615,6 +622,19 @@ final class OverlayWindow: NSWindow {
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 pb.writeObjects([img])
+            }
+            completion(nil)
+        }
+
+        func selectionDidPin(rect: NSRect) {
+            guard !state.finished else { return }
+            state.finished = true
+            let image = overlay.screenCtx.crop(rect)
+            for o in overlays { o.orderOut(nil) }
+            freeScreens()
+            CaptureSession.release(state: state)
+            if let img = image {
+                PinManager.shared.pin(img)
             }
             completion(nil)
         }

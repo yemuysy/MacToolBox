@@ -48,7 +48,7 @@ struct ScreenshotView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-                        Text("区域/窗口：拖拽框选或单击目标窗口捕获，随后弹出工具条（保存/复制/取消）。全屏：直接截取光标所在屏并保存到默认位置。")
+                        Text("区域/窗口：拖拽框选或单击目标窗口捕获，随后弹出工具条（保存/复制/贴图/取消）；点「截图并贴图」或贴图快捷键则选区后直接贴出。全屏：直接截取光标所在屏并保存到默认位置。")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -91,6 +91,16 @@ struct ScreenshotView: View {
                             .frame(minWidth: 140)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isBusy)
+
+                    Button {
+                        pinScreenshot()
+                    } label: {
+                        Label("截图并贴图", systemImage: "pin.fill")
+                            .frame(minWidth: 140)
+                    }
+                    .buttonStyle(.bordered)
                     .controlSize(.large)
                     .disabled(isBusy)
 
@@ -272,6 +282,19 @@ struct ScreenshotView: View {
             isBusy = false
             status = "框选区域后，用选区下方的工具条保存 / 复制 / 取消"
         }
+    }
+
+    /// 截图并直接贴图（对应「截图并贴图」按钮与贴图快捷键）：区域/窗口选区后直接贴出，全屏直接贴出。
+    private func pinScreenshot() {
+        isBusy = true
+        status = "框选区域后直接贴图（Esc 取消）…"
+        ScreenshotFlow.start(mode: mode, pin: true, autoSaveDir: nil) { _ in
+            Task { @MainActor in
+                self.isBusy = false
+                self.status = "已贴图"
+            }
+        }
+        isBusy = false
     }
 }
 
