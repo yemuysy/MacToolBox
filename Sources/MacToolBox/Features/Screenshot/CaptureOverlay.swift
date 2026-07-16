@@ -15,10 +15,16 @@ struct CaptureResult {
 }
 
 /// 单屏的捕获上下文：负责坐标转换与裁剪。
-struct ScreenContext {
+final class ScreenContext {
     let screen: NSScreen
-    let cgImage: CGImage
+    var cgImage: CGImage?
     let primaryHeight: CGFloat
+
+    init(screen: NSScreen, cgImage: CGImage, primaryHeight: CGFloat) {
+        self.screen = screen
+        self.cgImage = cgImage
+        self.primaryHeight = primaryHeight
+    }
 
     /// 全局 Cocoa 坐标 → 本屏视图局部坐标（y 向上）。
     func globalToView(_ global: NSPoint) -> NSPoint {
@@ -48,7 +54,8 @@ struct ScreenContext {
         let cgY = max(0, (screen.frame.height - yTop) * scale)
         let w = max(1, viewRect.width * scale)
         let h = max(1, viewRect.height * scale)
-        guard let sub = cgImage.cropping(to: CGRect(x: x, y: cgY, width: w, height: h)) else { return nil }
+        guard let cg = cgImage,
+              let sub = cg.cropping(to: CGRect(x: x, y: cgY, width: w, height: h)) else { return nil }
         let rep = NSBitmapImageRep(cgImage: sub)
         let img = NSImage()
         img.addRepresentation(rep)
@@ -282,7 +289,8 @@ final class SelectionView: NSView {
         ctx.saveGState()
         ctx.translateBy(x: 0, y: bounds.height)
         ctx.scaleBy(x: 1, y: -1)
-        ctx.draw(sctx.cgImage, in: CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height))
+        guard let cg = sctx.cgImage else { return }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height))
         ctx.restoreGState()
     }
 
@@ -572,23 +580,28 @@ final class OverlayWindow: NSWindow {
             self.defaultSaveDir = defaultSaveDir; self.completion = completion
         }
         func selectionDidStart() {}
+
+        /// 主动释放所有叠层持有的整屏大图（CGImage），避免会话结束后大图因被间接引用而常驻内存。
+        private func freeScreens() {
+            overlay.screenCtx.cgImage = nil
+            for o in overlays { o.screenCtx.cgImage = nil }
+        }
         func selectionDidChange(rect: NSRect) {}
         func selectionDidComplete(rect: NSRect, isWindow: Bool) {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
             CaptureSession.release(state: state)
-            if let img = overlay.screenCtx.crop(rect) {
-                completion(CaptureResult(image: img, sourceRect: rect))
-            } else {
-                completion(nil)
-            }
+            let image = overlay.screenCtx.crop(rect)
+            freeScreens()
+            completion(image.map { CaptureResult(image: $0, sourceRect: rect) })
         }
         func selectionCancelled() {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
             CaptureSession.release(state: state)
+            freeScreens()
             completion(nil)
         }
 
@@ -597,7 +610,9 @@ final class OverlayWindow: NSWindow {
             state.finished = true
             for o in overlays { o.orderOut(nil) }
             CaptureSession.release(state: state)
-            if let img = overlay.screenCtx.crop(rect) {
+            let image = overlay.screenCtx.crop(rect)
+            freeScreens()
+            if let img = image {
                 let dir = defaultSaveDir
                     ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
                     ?? URL(fileURLWithPath: NSHomeDirectory())
@@ -612,7 +627,9 @@ final class OverlayWindow: NSWindow {
             state.finished = true
             for o in overlays { o.orderOut(nil) }
             CaptureSession.release(state: state)
-            if let img = overlay.screenCtx.crop(rect) {
+            let image = overlay.screenCtx.crop(rect)
+            freeScreens()
+            if let img = image {
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 pb.writeObjects([img])
