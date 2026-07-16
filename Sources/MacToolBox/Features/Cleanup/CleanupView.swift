@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// 垃圾清理界面：按「系统 / 应用 / 上网」三类，每类下再按「应用」聚合为行，
-/// 以应用为单位勾选/清理，从根本上把可选项从「每个文件」收敛到「每个应用」（几十行），
-/// 选择计算从 O(N²) 降到 O(N)。展开应用行可查看具体文件（限 150 行）。
+/// 垃圾清理界面（照 Clean-Me 风格）：按「来源文件夹」聚合，基础（用户级）/高级（系统级）分离，
+/// 每个来源下按应用聚合为行，展开可见具体文件。系统级来源标锁并提示需管理员权限。
 struct CleanupView: View {
     @ObservedObject private var service = CleanupService.shared
     @State private var selected = Set<URL>()
@@ -14,10 +13,12 @@ struct CleanupView: View {
                 headerCard
                 actionCard
                 if !service.lastErrors.isEmpty { errorCard }
-                if service.isScanning && service.groupsByCategory.isEmpty {
+                if service.isScanning && service.items.isEmpty {
                     scanningPlaceholder
+                } else if sections.isEmpty {
+                    emptyCard
                 } else {
-                    categoryCards
+                    sourceCards
                 }
                 if service.lastCleanedBytes > 0 { resultSummary }
                 Spacer(minLength: 0)
@@ -45,11 +46,22 @@ struct CleanupView: View {
         TabHeaderCard(
             icon: "trash.fill",
             title: "垃圾清理",
-            subtitle: "按应用聚合 · 选择即清理该应用全部垃圾"
+            subtitle: "照 Clean-Me 思路按来源聚合 · 只清内容不删目录"
         ) {
             if service.isScanning {
-                ProgressView()
-                    .controlSize(.small)
+                ProgressView().controlSize(.small)
+            } else {
+                Button {
+                    selected.removeAll()
+                    Task { await service.scan() }
+                } label: {
+                    Text("重新扫描")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(Theme.accentStart)
+                .disabled(service.isCleaning)
             }
         }
     }
@@ -60,16 +72,6 @@ struct CleanupView: View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
-                    Button {
-                        selected.removeAll()
-                        Task { await service.scan() }
-                    } label: {
-                        Label("重新扫描", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .disabled(service.isScanning || service.isCleaning)
-
                     Button {
                         selected = service.defaultSelection()
                     } label: {
@@ -145,6 +147,21 @@ struct CleanupView: View {
         }
     }
 
+    private var emptyCard: some View {
+        Card {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle")
+                    .foregroundStyle(.secondary)
+                Text("未发现可清理的垃圾文件。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
     // MARK: - 错误提示
 
     private var errorCard: some View {
@@ -166,24 +183,20 @@ struct CleanupView: View {
         }
     }
 
-    // MARK: - 分类卡片
+    // MARK: - 按来源分组
 
-    private var categoryCards: some View {
+    private var sourceCards: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                SectionHeader(title: "按应用清理", icon: "doc.on.doc")
+                SectionHeader(title: "按来源清理", icon: "folder")
                 Spacer()
-                Text("共 \(service.items.count) 项 · \(formatBytes(service.totalSize))")
+                Text("共 \(service.items.count) 项 · 可释放 \(formatBytes(service.totalSize))")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(CleanupCategory.allCases) { category in
-                CategoryCard(
-                    category: category,
-                    groups: service.groupsByCategory[category] ?? [],
-                    selected: $selected
-                )
+            ForEach(sections) { section in
+                SourceCard(section: section, selected: $selected)
             }
         }
     }
@@ -197,6 +210,19 @@ struct CleanupView: View {
                     .font(.system(size: 13, weight: .medium))
                 Spacer()
             }
+        }
+    }
+
+    // MARK: - 聚合（按来源）
+
+    private var sections: [SourceSection] {
+        let grouped = Dictionary(grouping: service.items, by: { $0.source })
+        return grouped.map { src, items in
+            SourceSection(source: src, needsAdmin: items.first?.needsAdmin ?? false, items: items)
+        }.sorted { a, b in
+            // 基础（用户级）来源在前，系统级在后；同级按大小降序。
+            if a.needsAdmin != b.needsAdmin { return !a.needsAdmin }
+            return a.totalSize > b.totalSize
         }
     }
 
@@ -237,20 +263,43 @@ struct CleanupView: View {
     }
 }
 
-// MARK: - 单个分类卡片
+// MARK: - 来源聚合结构
 
-private struct CategoryCard: View {
-    let category: CleanupCategory
-    let groups: [CleanupGroup]
+private struct SourceSection: Identifiable {
+    let source: String
+    let needsAdmin: Bool
+    let items: [CleanupItem]
+    var id: String { source }
+
+    var totalSize: Int64 { items.reduce(0) { $0 + $1.size } }
+
+    var appGroups: [AppGroup] {
+        let g = Dictionary(grouping: items, by: { $0.appName })
+        return g.map { AppGroup(appName: $0.key, items: $0.value) }
+            .sorted { $0.totalSize > $1.totalSize }
+    }
+}
+
+private struct AppGroup: Identifiable {
+    let appName: String
+    let items: [CleanupItem]
+    var id: String { appName.isEmpty ? "__system__" : appName }
+    var count: Int { items.count }
+    var totalSize: Int64 { items.reduce(0) { $0 + $1.size } }
+    var urlSet: Set<URL> { Set(items.map { $0.url }) }
+    var displayName: String { appName.isEmpty ? "系统文件" : appName }
+}
+
+// MARK: - 单个来源卡片
+
+private struct SourceCard: View {
+    let section: SourceSection
     @Binding var selected: Set<URL>
 
-    // 该类别全部成员 URL 集合（O(组大小) 构建一次/渲染）。
-    private var categoryURLSet: Set<URL> { Set(groups.flatMap { $0.urlSet }) }
-    private var selectedInCategory: Set<URL> { selected.intersection(categoryURLSet) }
-    private var allSelected: Bool { !categoryURLSet.isEmpty && selectedInCategory == categoryURLSet }
-    private var someSelected: Bool { !selectedInCategory.isEmpty && !allSelected }
-
-    private var totalBytes: Int64 { groups.reduce(0) { $0 + $1.totalSize } }
+    private var sectionURLSet: Set<URL> { Set(section.items.map { $0.url }) }
+    private var selectedInSection: Set<URL> { selected.intersection(sectionURLSet) }
+    private var allSelected: Bool { !sectionURLSet.isEmpty && selectedInSection == sectionURLSet }
+    private var someSelected: Bool { !selectedInSection.isEmpty && !allSelected }
 
     var body: some View {
         Card {
@@ -258,54 +307,57 @@ private struct CategoryCard: View {
                 HStack(spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(categoryColor.opacity(0.12))
+                            .fill((section.needsAdmin ? Color.orange : Theme.accentStart).opacity(0.12))
                             .frame(width: 36, height: 36)
-                        Image(systemName: category.icon)
+                        Image(systemName: section.needsAdmin ? "lock.fill" : "folder.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(categoryColor)
+                            .foregroundStyle(section.needsAdmin ? .orange : Theme.accentStart)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(category.displayName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        HStack(spacing: 4) {
-                            Text("\(groups.count) 个应用")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            Text("·")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                            Text("\(groups.reduce(0) { $0 + $1.count }) 项")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text(section.source)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            if section.needsAdmin {
+                                Text("需管理员")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.15))
+                                    .foregroundStyle(.orange)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
                         }
+                        Text("\(section.items.count) 项 · \(section.appGroups.count) 个来源")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    Text(formatBytes(totalBytes))
+                    Text(formatBytes(section.totalSize))
                         .font(.system(size: 14, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.primary)
 
                     Button {
-                        toggleCategorySelection()
+                        toggleSection()
                     } label: {
                         Image(systemName: selectionIcon)
                             .font(.system(size: 18))
                             .foregroundStyle(selectionColor)
                     }
                     .buttonStyle(.borderless)
-                    .disabled(groups.isEmpty)
+                    .disabled(section.items.isEmpty)
                 }
                 .padding(12)
 
-                if !groups.isEmpty {
+                if !section.appGroups.isEmpty {
                     Divider()
                     VStack(spacing: 0) {
-                        ForEach(groups) { group in
+                        ForEach(section.appGroups) { group in
                             AppRow(group: group, selected: $selected)
-                            if group.id != groups.last?.id {
+                            if group.id != section.appGroups.last?.id {
                                 Divider().padding(.leading, 50)
                             }
                         }
@@ -314,14 +366,6 @@ private struct CategoryCard: View {
                     .padding(.bottom, 10)
                 }
             }
-        }
-    }
-
-    private var categoryColor: Color {
-        switch category {
-        case .system: return .orange
-        case .application: return .blue
-        case .internet: return .green
         }
     }
 
@@ -335,11 +379,11 @@ private struct CategoryCard: View {
         allSelected || someSelected ? Theme.accentStart : .secondary
     }
 
-    private func toggleCategorySelection() {
+    private func toggleSection() {
         if allSelected {
-            selected.subtract(categoryURLSet)
+            selected.subtract(sectionURLSet)
         } else {
-            selected.formUnion(categoryURLSet)
+            selected.formUnion(sectionURLSet)
         }
     }
 }
@@ -347,7 +391,7 @@ private struct CategoryCard: View {
 // MARK: - 单个应用行
 
 private struct AppRow: View {
-    let group: CleanupGroup
+    let group: AppGroup
     @Binding var selected: Set<URL>
 
     @State private var isExpanded: Bool = false
@@ -362,14 +406,13 @@ private struct AppRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 应用标题行
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) {
                     isExpanded.toggle()
                 }
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: group.category.icon)
+                    Image(systemName: "app.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
@@ -397,7 +440,7 @@ private struct AppRow: View {
                         .foregroundStyle(.primary)
 
                     Button {
-                        toggleGroupSelection()
+                        toggleGroup()
                     } label: {
                         Image(systemName: selectionIcon)
                             .font(.system(size: 17))
@@ -448,7 +491,7 @@ private struct AppRow: View {
         allSelected || someSelected ? Theme.accentStart : .secondary
     }
 
-    private func toggleGroupSelection() {
+    private func toggleGroup() {
         if allSelected {
             selected.subtract(group.urlSet)
         } else {

@@ -53,7 +53,7 @@ enum DiskCleanerTests {
 
         // 扫描测试
         let collector = Collector()
-        let total = await cleaner.scan(roots: [base]) { batch in
+        let total = await cleaner.scan() { batch in
             for item in batch { collector.add(item) }
         }
         let allItems = collector.all

@@ -87,8 +87,8 @@ final class CleanupService: ObservableObject, @unchecked Sendable {
             buildGroupsFromGrouping()
         }
 
-        let roots = cleaner.allowedRoots
-        _ = await cleaner.scan(roots: roots) { [weak self] batch in
+        let targets = cleaner.targets
+        _ = await cleaner.scan(targets: targets) { [weak self] batch in
             await MainActor.run {
                 self?.appendItems(batch)
             }
@@ -130,9 +130,10 @@ final class CleanupService: ObservableObject, @unchecked Sendable {
     // MARK: - 默认选择策略
 
     /// 从当前扫描结果中生成默认应勾选的安全项集合。
-    /// 规则：只选中 `risk == .safe` 的项；谨慎项需用户手动确认。
+    /// 规则：只选中 `risk == .safe` 且非系统级（不需管理员权限）的项；
+    /// 系统级 safe 项（如系统缓存）默认不勾选，需用户手动确认并承担管理员授权风险。
     @MainActor func defaultSelection() -> Set<URL> {
-        Set(items.filter { $0.risk == .safe }.map { $0.url })
+        Set(items.filter { $0.risk == .safe && !$0.needsAdmin }.map { $0.url })
     }
 
     /// 计算选中集合的总字节数（O(选中数)，依赖预构建的 `sizeByURL`）。

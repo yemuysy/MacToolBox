@@ -50,12 +50,27 @@ struct CleanupItem: Identifiable, Sendable {
     let appName: String        // 所属应用名称（系统垃圾为空）
     let risk: CleanupRisk
     let kind: String           // 人类可读的种类，例如 "缓存文件" / "日志文件"
+    /// 来源标签（如「用户缓存」「废纸篓」），照 Clean-Me 的清理项分类地图展示。
+    let source: String
+    /// 是否系统级目标：删除需管理员权限，普通权限下会失败并记录（照 KnockKnock 的可管理性标记）。
+    let needsAdmin: Bool
+
+    init(url: URL, path: String, size: Int64, isDirectory: Bool, category: CleanupCategory,
+         appName: String, risk: CleanupRisk, kind: String, source: String = "", needsAdmin: Bool = false) {
+        self.url = url
+        self.path = path
+        self.size = size
+        self.isDirectory = isDirectory
+        self.category = category
+        self.appName = appName
+        self.risk = risk
+        self.kind = kind
+        self.source = source
+        self.needsAdmin = needsAdmin
+    }
 }
 
 /// 按「类别 + 应用」聚合的一组可清理项，是 UI 选择与展示的最小单元。
-///
-/// 用户通常以「应用」为单位决定是否清理。把扁平的几万个文件收敛成几十个应用组，
-/// 可将 SwiftUI 视图数量从 O(N) 降到 O(应用数)，并把选择字节计算从 O(N²) 降到 O(N)。
 struct CleanupGroup: Identifiable, Sendable {
     let category: CleanupCategory
     let appName: String
@@ -75,6 +90,45 @@ struct CleanupGroup: Identifiable, Sendable {
     var isSafe: Bool { items.allSatisfy { $0.risk == .safe } }
     /// 展示名：应用组显示应用名，系统垃圾显示「系统文件」。
     var displayName: String { appName.isEmpty ? "系统文件" : appName }
+}
+
+// MARK: - 清理目标清单（照 Clean-Me 的「路径地图」）
+
+/// 单个清理目标（一组根路径）。照 Clean-Me 把需清理的系统目录集中定义为路径地图，
+/// 系统级目录标记 `needsAdmin`（普通权限可扫描但删除会被系统拒绝，UI 上给出管理员提示）。
+///
+/// 设计要点（安全，同 Clean-Me）：
+/// - 只删除**目录内容**，绝不删除根目录本身；
+/// - 扫描/删除都严格限制在 `root` 前缀树内（白名单）。
+struct CleanupTarget: Identifiable, Sendable {
+    let id: String
+    let displayName: String
+    let root: URL
+    let needsAdmin: Bool
+    let icon: String
+}
+
+enum CleanupTargets {
+    /// 默认清理目标地图（照 Clean-Me + cleanmymac 融合）。
+    static let all: [CleanupTarget] = {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            CleanupTarget(id: "user-cache", displayName: "用户缓存",
+                          root: home.appendingPathComponent("Library/Caches"), needsAdmin: false, icon: "folder"),
+            CleanupTarget(id: "system-cache", displayName: "系统缓存",
+                          root: URL(fileURLWithPath: "/Library/Caches"), needsAdmin: true, icon: "folder.fill"),
+            CleanupTarget(id: "user-logs", displayName: "用户日志",
+                          root: home.appendingPathComponent("Library/Logs"), needsAdmin: false, icon: "doc.text"),
+            CleanupTarget(id: "system-logs", displayName: "系统日志",
+                          root: URL(fileURLWithPath: "/Library/Logs"), needsAdmin: true, icon: "doc.text.fill"),
+            CleanupTarget(id: "tmp", displayName: "临时文件",
+                          root: URL(fileURLWithPath: NSTemporaryDirectory()), needsAdmin: false, icon: "clock"),
+            CleanupTarget(id: "xcode", displayName: "Xcode 派生数据",
+                          root: home.appendingPathComponent("Library/Developer/Xcode/DerivedData"), needsAdmin: false, icon: "hammer"),
+            CleanupTarget(id: "trash", displayName: "废纸篓",
+                          root: home.appendingPathComponent(".Trash"), needsAdmin: false, icon: "trash"),
+        ]
+    }()
 }
 
 // MARK: - 分类规则引擎
@@ -122,12 +176,27 @@ struct CleanupClassifier {
         "com.vivaldi.Vivaldi": "Vivaldi"
     ]
 
+    /// 开发者工具缓存目录名 → 显示名（照 cleanmymac 的 dev 分类）。
+    private static let devToolDirs: [String: String] = [
+        "DerivedData": "Xcode",
+        "com.apple.dt.Xcode": "Xcode",
+        "npm": "npm",
+        "Homebrew": "Homebrew",
+        "org.swift.swiftpm": "SwiftPM",
+        "go-build": "Go",
+        "cargo": "Cargo",
+        "com.apple.llvm": "Clang/LLVM",
+        "com.apple.dt.CoreSimulator": "iOS Simulator",
+        "android": "Android SDK"
+    ]
+
     /// 根据路径与父目录信息判断分类。
     static func classify(_ url: URL, parentRoot: URL) -> (category: CleanupCategory, appName: String, risk: CleanupRisk, kind: String) {
         let path = url.path
         let parent = url.deletingLastPathComponent().path
+        let lastName = url.deletingLastPathComponent().lastPathComponent
 
-        // 1. 系统垃圾：Logs / tmp / 系统临时目录 / 用户日志目录
+        // 1. 系统垃圾：Logs / tmp / 系统临时目录
         if parentRoot.lastPathComponent == "Logs" ||
             parentRoot.path.hasSuffix("/Library/Logs") ||
             path.contains("/var/tmp") ||
@@ -138,16 +207,28 @@ struct CleanupClassifier {
             return (.system, "", .safe, "日志/临时文件")
         }
 
+        // 1.5 开发者工具特殊路径（不在 Caches 下，需在 Caches 判定前识别）
+        if path.contains("/Developer/Xcode/DerivedData") {
+            return (.application, "Xcode", .safe, "Xcode 派生数据")
+        }
+        if path.contains("/CoreSimulator/") {
+            return (.application, "iOS Simulator", .safe, "模拟器缓存")
+        }
+
         // 2. 上网垃圾：Caches 下命中浏览器 bundle id
         if parentRoot.lastPathComponent == "Caches" || path.contains("/Library/Caches/") {
             for (bundle, name) in browserBundleIDs {
-                if parent.contains("/\(bundle)/") || parent.contains("/\(bundle)") || url.lastPathComponent == bundle {
+                if parent.contains("/\(bundle)") || url.lastPathComponent == bundle {
                     return (.internet, name, .safe, "浏览器缓存")
                 }
             }
+            // 2.5 开发者工具（按目录名）
+            if let devName = devToolDirs[lastName] {
+                return (.application, devName, .safe, "开发工具缓存")
+            }
             // 3. 应用垃圾：Caches 下命中应用 bundle id
             for (bundle, name) in appBundleIDs {
-                if parent.contains("/\(bundle)/") || parent.contains("/\(bundle)") || url.lastPathComponent == bundle {
+                if parent.contains("/\(bundle)") || url.lastPathComponent == bundle {
                     return (.application, name, .safe, "应用缓存")
                 }
             }
@@ -178,41 +259,45 @@ struct CleanupClassifier {
 
 // MARK: - 垃圾清理引擎（actor）
 
-/// 用户级垃圾清理引擎。
+/// 用户级垃圾清理引擎（照 Clean-Me 的「路径地图 + 只删内容」模型扩展）。
 ///
 /// 设计要点（对应需求规范）：
 /// 1. 使用 `actor` 隔离可变状态，所有文件 I/O 在 actor 串行执行器（非主线程）上异步进行，
 ///    绝不阻塞主线程（Main Thread）。
-/// 2. 递归扫描 `~/Library/Caches` 与 `~/Library/Logs`，通过 `@Sendable` 回调把「当前扫描到的
+/// 2. 按 `CleanupTarget` 清单扫描根目录，通过 `@Sendable` 回调把「当前扫描到的
 ///    文件路径 + 大小」安全地派发回调用方（调用方负责桥接到 `@MainActor` 更新 SwiftUI）。
-/// 3. `delete(at:)` 对越白名单、只读或无权文件做 try-catch 保护，跳过并集中记录错误，绝不崩溃。
-/// 4. **白名单保护**：仅允许扫描/删除 `allowedRoots` 前缀下的路径。默认覆盖用户的
-///    Caches / Logs / 临时目录；测试时通过 `init(allowedRoots:)` 注入沙盒目录即可。
-/// 5. **分类**：每个 CleanupItem 都携带 category / appName / risk，供 UI 分组展示与默认选中。
+/// 3. `delete(at:)` 对越白名单、只读、根目录本身或无权文件做 try-catch 保护，跳过并集中记录错误，绝不崩溃。
+/// 4. **白名单保护**：仅允许扫描/删除 `targets` 中根目录前缀树下的路径。
+/// 5. **只删内容不删根**：`isRoot` 保护，禁止删除清理目标根目录本身（Clean-Me 安全核心）。
+/// 6. **分类**：每个 CleanupItem 都携带 category / appName / risk / source，供 UI 分组展示与默认选中。
 ///
 /// 注意：该类型只依赖 Foundation，可被独立 `swift` 命令编译（用于沙盒单测），无需 AppKit。
 actor DiskCleaner {
 
-    /// 允许扫描/删除的根目录集合。任何不在此前缀树下的路径都会被拒绝。
-    let allowedRoots: [URL]
+    /// 待清理目标清单。任何不在此前缀树下的路径都会被拒绝。
+    let targets: [CleanupTarget]
 
-    /// 默认白名单：当前用户的 Caches、Logs、系统临时目录。
-    static var defaultRoots: [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return [
-            home.appendingPathComponent("Library/Caches"),
-            home.appendingPathComponent("Library/Logs"),
-            URL(fileURLWithPath: NSTemporaryDirectory())
-        ]
-    }
+    /// 默认目标地图。
+    static var defaultTargets: [CleanupTarget] { CleanupTargets.all }
 
-    /// - Parameter allowedRoots: 自定义白名单（用于沙盒测试）。为空时退回默认用户目录。
+    /// 白名单根集合（targets 的 root 标准化）。
+    var allowedRoots: [URL] { targets.map { $0.root.standardized } }
+
+    /// 兼容旧调用：传入根目录数组时，自动包装为「用户级、无管理员需求」的 target。主要用于测试。
     init(allowedRoots: [URL]? = nil) {
         if let allowedRoots, !allowedRoots.isEmpty {
-            self.allowedRoots = allowedRoots.map { $0.standardized }
+            self.targets = allowedRoots.map {
+                CleanupTarget(id: $0.standardized.path, displayName: $0.lastPathComponent,
+                              root: $0, needsAdmin: false, icon: "folder")
+            }
         } else {
-            self.allowedRoots = Self.defaultRoots
+            self.targets = Self.defaultTargets
         }
+    }
+
+    /// 新 API：传入清理目标清单。
+    init(targets: [CleanupTarget]) {
+        self.targets = targets
     }
 
     /// 校验某 URL 是否落在白名单前缀树内（含根本身）。
@@ -224,16 +309,23 @@ actor DiskCleaner {
         }
     }
 
-    /// 扫描给定根目录，批量通过 `report` 暴露文件（每攒够一批才跨 actor 回传一次，
+    /// 是否为某个清理目标的根目录本身（只删内容不删根）。
+    func isRoot(_ url: URL) -> Bool {
+        let p = url.standardized.path
+        return targets.contains { $0.root.standardized.path == p }
+    }
+
+    /// 扫描给定目标，批量通过 `report` 暴露文件（每攒够一批才跨 actor 回传一次，
     /// 避免逐个文件跨 actor 边界导致的性能雪崩），返回累计字节数。
-    /// - Parameter roots: 待扫描根目录。不在白名单内的根会被自动跳过。
+    /// - Parameter targets: 待扫描目标；为 nil 时扫描全部默认目标。不在白名单内的根会被自动跳过。
     /// - Parameter report: `@Sendable` 异步回调，每批量（默认 256 个）文件调用一次。
-    func scan(roots: [URL], report: @Sendable @escaping ([CleanupItem]) async -> Void) async -> Int64 {
+    func scan(targets: [CleanupTarget]? = nil, report: @Sendable @escaping ([CleanupItem]) async -> Void) async -> Int64 {
+        let ts = targets ?? self.targets
         let batchSize = 256
         var total: Int64 = 0
-        for root in roots where isAllowed(root) {
+        for target in ts where isAllowed(target.root) {
             // scanDirectory 完全同步、无 actor hop，返回该根下全部文件。
-            let collected = scanDirectory(root, parentRoot: root)
+            let collected = scanDirectory(target.root, parentRoot: target.root, target: target)
             total += collected.reduce(0) { $0 + $1.size }
             // 分批回传：每 batchSize 个文件才跨一次 actor 边界。
             var idx = 0
@@ -248,7 +340,7 @@ actor DiskCleaner {
     }
 
     /// 同步枚举目录，返回扫到的全部 `CleanupItem`（无 actor hop，纯本地计算）。
-    private func scanDirectory(_ url: URL, parentRoot: URL) -> [CleanupItem] {
+    private func scanDirectory(_ url: URL, parentRoot: URL, target: CleanupTarget) -> [CleanupItem] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: url,
@@ -278,7 +370,9 @@ actor DiskCleaner {
                     category: category,
                     appName: appName,
                     risk: risk,
-                    kind: kind
+                    kind: kind,
+                    source: target.displayName,
+                    needsAdmin: target.needsAdmin
                 ))
             } catch {
                 continue
@@ -289,6 +383,7 @@ actor DiskCleaner {
 
     /// 删除指定 URL 集合，返回「未能删除」的 `url -> 错误描述` 映射。
     /// - 不在白名单内的 URL 一律拒绝并记录（安全保护），不执行任何文件系统写入。
+    /// - 根目录本身拒绝删除（只删内容不删根）。
     /// - 只读 / 无权限文件捕获异常后跳过，不崩溃。
     func delete(at urls: [URL]) -> [URL: String] {
         let fm = FileManager.default
@@ -297,6 +392,10 @@ actor DiskCleaner {
         for url in urls {
             guard isAllowed(url) else {
                 failures[url] = "安全保护：不在允许删除的白名单目录内，已跳过。"
+                continue
+            }
+            guard !isRoot(url) else {
+                failures[url] = "安全保护：不删除清理目标根目录本身，仅清理其内容。"
                 continue
             }
             do {
