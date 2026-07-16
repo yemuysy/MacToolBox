@@ -19,7 +19,7 @@ struct TestRunner {
     /// 使用 async main：直接 await actor 测试，避免在主线程用信号量阻塞导致的并发死锁。
     static func main() async {
         print("== MacToolBox 沙盒测试 ==")
-        ScreenshotEngineTests.run()
+        ScreenshotTests.run()
         HotkeyTests.run()
         BrewServiceTests.run()
         LaunchAgentServiceTests.run()

@@ -133,48 +133,13 @@ final class HotkeyService: @unchecked Sendable {
         case .regionScreenshot, .fullScreenshot, .windowScreenshot:
             let mode: CaptureMode = action == .fullScreenshot ? .full
                 : (action == .windowScreenshot ? .window : .region)
-            quickCapture(mode, pin: false)
+            ScreenshotFlow.start(mode: mode, pin: false)
         case .pinScreenshot:
-            quickCapture(.region, pin: true)
+            ScreenshotFlow.start(mode: .region, pin: true)
         case .toggleMainWindow:
             (NSApplication.shared.delegate as? AppDelegate)?.toggleMainWindow()
         case .openOverview:
             (NSApplication.shared.delegate as? AppDelegate)?.reveal(feature: .overview)
-        }
-    }
-
-    @MainActor
-    private func quickCapture(_ mode: CaptureMode, pin: Bool) {
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory())
-        let handle: (CaptureMode, CGRect?) -> Void = { m, rect in
-            let result = ScreenshotEngine.capture(m, region: rect)
-            switch result {
-            case .success(let shot):
-                if pin {
-                    // 直接贴图，不需要落盘文件
-                    PinnedImageManager.shared.pin(shot.image)
-                    ScreenshotEngine.cleanup(shot)
-                } else {
-                    // 与 UI 一致：截图后弹预览面板，让用户决定保存到哪 / 复制 / 显示
-                    ScreenshotPreviewController.shared.show(
-                        shot: shot,
-                        defaultDirectory: desktop,
-                        onSaved: { _ in }
-                    )
-                }
-            case .failure:
-                break
-            }
-        }
-        if mode == .region {
-            RegionSelector.begin { rect in
-                Task { @MainActor in
-                    if let rect { handle(.region, rect) }
-                }
-            }
-        } else {
-            handle(mode, nil)
         }
     }
 

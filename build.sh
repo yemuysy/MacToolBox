@@ -68,6 +68,7 @@ swiftc \
     -O \
     -framework SwiftUI \
     -framework AppKit \
+    -framework Vision \
     -framework Foundation \
     -framework DiskArbitration \
     -framework CoreFoundation \

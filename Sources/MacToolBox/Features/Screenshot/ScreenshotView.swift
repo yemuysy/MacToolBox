@@ -8,9 +8,9 @@ struct ScreenshotView: View {
     @State private var autoSave = false
     @State private var saveDir: URL
     @State private var recent: [SavedShot] = []
-    @State private var status: String = "选择模式后开始截图（区域模式：拖拽选区 → 拖动/调整 → Enter 确认）"
+    @State private var status: String = "选择模式后开始截图（区域模式：拖拽选区 → 自动进入标注编辑器）"
     @State private var isBusy = false
-    @State private var hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
+    @State private var hasPermission = ScreenshotFlow.checkPermission()
     /// 最近一次捕获保存的文件（用于「贴图」按钮）
     @State private var lastCapturedURL: URL?
 
@@ -26,7 +26,7 @@ struct ScreenshotView: View {
                 TabHeaderCard(
                     icon: "camera.viewfinder",
                     title: "截图",
-                    subtitle: "区域 / 全屏 / 窗口 · 保存文件或剪贴板 · 支持贴图"
+                    subtitle: "区域 / 全屏 / 窗口 · 捕获后进入标注编辑器 · 支持贴图"
                 )
 
                 // 权限引导（无屏幕录制权限时显示）
@@ -48,6 +48,10 @@ struct ScreenshotView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
+                        Text("区域/窗口：拖拽或单击目标窗口捕获，随后进入标注编辑器（箭头/矩形/文字/序号/马赛克/画笔）。全屏：直接截取当前屏。")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -55,7 +59,7 @@ struct ScreenshotView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: "保存位置", icon: "tray.and.arrow.down")
-                        Toggle("截图后直接保存到默认位置（不弹预览面板）", isOn: $autoSave)
+                        Toggle("截图后直接保存到默认位置（不弹编辑器）", isOn: $autoSave)
                             .toggleStyle(.switch)
                         Divider().padding(.leading, 4)
                         HStack(spacing: 8) {
@@ -70,7 +74,7 @@ struct ScreenshotView: View {
                             Button("更改…") { chooseDir() }
                                 .controlSize(.small)
                         }
-                        Text("默认位置同时作为「保存到…」面板的初始目录。关闭上方开关则截图后弹出预览，可另选路径或复制到剪贴板。")
+                        Text("默认位置同时作为「保存到…」面板的初始目录。开启上方开关则截图后直接落盘，否则进入编辑器手动保存/复制/贴图/OCR。")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -92,7 +96,7 @@ struct ScreenshotView: View {
 
                     if let url = lastCapturedURL {
                         Button {
-                            PinnedImageManager.shared.pin(url: url)
+                            PinManager.shared.pin(url: url)
                         } label: {
                             Label("贴图", systemImage: "pin.fill")
                                 .frame(minWidth: 80)
@@ -131,7 +135,7 @@ struct ScreenshotView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
+            hasPermission = ScreenshotFlow.checkPermission()
         }
     }
 
@@ -139,7 +143,6 @@ struct ScreenshotView: View {
     /// 快捷键变更时只重渲染这张卡，不会触发整个 ScreenshotView 重渲染。
     private struct HotkeySection: View {
         @State private var tick = 0
-
         var body: some View {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
@@ -197,7 +200,7 @@ struct ScreenshotView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([shot.url])
             }
             Button("贴图") {
-                PinnedImageManager.shared.pin(url: shot.url)
+                PinManager.shared.pin(url: shot.url)
             }
         }
     }
@@ -223,7 +226,7 @@ struct ScreenshotView: View {
                     }
                     .controlSize(.small)
                     Button {
-                        hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
+                        hasPermission = ScreenshotFlow.checkPermission()
                         if hasPermission {
                             status = "权限已就绪"
                         }
@@ -253,58 +256,21 @@ struct ScreenshotView: View {
     private func takeScreenshot() {
         isBusy = true
         status = "准备截图…"
-        if mode == .region {
-            RegionSelector.begin { rect in
+        if autoSave {
+            ScreenshotFlow.start(mode: mode, pin: false, autoSaveDir: saveDir) { url in
                 Task { @MainActor in
-                    if let rect {
-                        performCapture(region: rect)
-                    } else {
-                        isBusy = false
-                        status = "已取消"
-                    }
+                    self.isBusy = false
+                    self.recent.insert(SavedShot(url: url, mode: mode, date: Date()), at: 0)
+                    self.recent = Array(self.recent.prefix(12))
+                    self.lastCapturedURL = url
+                    self.status = "已保存到 \(url.lastPathComponent)"
                 }
             }
         } else {
-            performCapture(region: nil)
-        }
-    }
-
-    @MainActor
-    private func performCapture(region: CGRect?) {
-        let result = ScreenshotEngine.capture(mode, region: region)
-        isBusy = false
-        switch result {
-        case .success(let shot):
-            if autoSave {
-                let dest = saveDir.appendingPathComponent(ScreenshotEngine.buildFilename())
-                if ScreenshotEngine.save(shot, to: dest) {
-                    ScreenshotEngine.cleanup(shot)
-                    recent.insert(SavedShot(url: dest, mode: mode, date: Date()), at: 0)
-                    recent = Array(recent.prefix(12))
-                    lastCapturedURL = dest
-                    status = "已保存到 \(dest.lastPathComponent)"
-                } else {
-                    status = "保存失败：无法写入 \(dest.path)"
-                }
-            } else {
-                ScreenshotPreviewController.shared.show(
-                    shot: shot,
-                    defaultDirectory: saveDir,
-                    onSaved: { url in
-                        recent.insert(SavedShot(url: url, mode: mode, date: Date()), at: 0)
-                        recent = Array(recent.prefix(12))
-                        lastCapturedURL = url
-                        status = "已保存到 \(url.lastPathComponent)"
-                    }
-                )
-                status = "已截图，请在预览面板选择保存方式"
-            }
-        case .failure(let err):
-            if let shotErr = err as? ScreenshotEngine.ScreenshotError,
-               case .noPermission = shotErr {
-                hasPermission = false
-            }
-            status = err.localizedDescription
+            // 进入标注编辑器，busy 由编辑器接管
+            ScreenshotFlow.start(mode: mode, pin: false, autoSaveDir: nil) { _ in }
+            isBusy = false
+            status = "截图编辑中…"
         }
     }
 }

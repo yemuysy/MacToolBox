@@ -43,6 +43,7 @@ swiftc \
     -module-cache-path "$MODULE_CACHE" \
     -framework SwiftUI \
     -framework AppKit \
+    -framework Vision \
     -framework Foundation \
     -framework DiskArbitration \
     -framework CoreFoundation \
