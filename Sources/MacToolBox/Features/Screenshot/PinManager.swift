@@ -1,6 +1,6 @@
 import AppKit
 
-/// 贴图窗口：无边框、置顶、可拖移、滚轮缩放、Esc/X 关闭、支持多张叠加。
+/// 贴图窗口：无边框、置顶、可拖移、滚轮缩放、Esc/X/Cmd+W 关闭、支持多张叠加。
 /// 借鉴 capcap 的 PinLauncher/PinWindow，去掉其内部依赖，保留核心交互。
 final class PinWindow: NSWindow {
     var image: NSImage? {
@@ -66,6 +66,16 @@ final class PinWindow: NSWindow {
         default:
             super.keyDown(with: event)
         }
+    }
+
+    /// Cmd+W 关闭当前贴图。带 command 修饰键的按键会先经 performKeyEquivalent，
+    /// 在此拦截并消费，避免被主窗口「Close」菜单项抢走。
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), event.keyCode == 13 {  // 13 = W
+            close()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func close() {
