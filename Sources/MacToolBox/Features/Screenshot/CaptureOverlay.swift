@@ -590,28 +590,29 @@ final class OverlayWindow: NSWindow {
         func selectionDidComplete(rect: NSRect, isWindow: Bool) {
             guard !state.finished else { return }
             state.finished = true
-            for o in overlays { o.orderOut(nil) }
-            CaptureSession.release(state: state)
+            // 必须先 crop 取图（overlay/screenCtx/cgImage 还活着），再 orderOut + release + freeScreens
             let image = overlay.screenCtx.crop(rect)
+            for o in overlays { o.orderOut(nil) }
             freeScreens()
+            CaptureSession.release(state: state)
             completion(image.map { CaptureResult(image: $0, sourceRect: rect) })
         }
         func selectionCancelled() {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
-            CaptureSession.release(state: state)
             freeScreens()
+            CaptureSession.release(state: state)
             completion(nil)
         }
 
         func selectionDidSave(rect: NSRect) {
             guard !state.finished else { return }
             state.finished = true
-            for o in overlays { o.orderOut(nil) }
-            CaptureSession.release(state: state)
             let image = overlay.screenCtx.crop(rect)
+            for o in overlays { o.orderOut(nil) }
             freeScreens()
+            CaptureSession.release(state: state)
             if let img = image {
                 let dir = defaultSaveDir
                     ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
@@ -625,10 +626,10 @@ final class OverlayWindow: NSWindow {
         func selectionDidCopy(rect: NSRect) {
             guard !state.finished else { return }
             state.finished = true
-            for o in overlays { o.orderOut(nil) }
-            CaptureSession.release(state: state)
             let image = overlay.screenCtx.crop(rect)
+            for o in overlays { o.orderOut(nil) }
             freeScreens()
+            CaptureSession.release(state: state)
             if let img = image {
                 let pb = NSPasteboard.general
                 pb.clearContents()
