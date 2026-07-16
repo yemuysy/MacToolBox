@@ -8,7 +8,7 @@ struct ScreenshotView: View {
     @State private var saveToClipboard = false
     @State private var saveDir: URL
     @State private var recent: [SavedShot] = []
-    @State private var status: String = "选择模式后开始截图"
+    @State private var status: String = "选择模式后开始截图（区域模式：拖拽选区 → 拖动/调整 → Enter 确认）"
     @State private var isBusy = false
     @State private var hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
     /// 最近一次捕获保存的文件（用于「贴图」按钮）
