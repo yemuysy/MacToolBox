@@ -86,7 +86,7 @@ final class HotkeyService: @unchecked Sendable {
         var ref: EventHotKeyRef?
         let err = RegisterEventHotKey(
             hotkey.keyCode,
-            UInt32(hotkey.modifiers),
+            hotkey.modifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,

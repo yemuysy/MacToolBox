@@ -76,7 +76,7 @@ struct MenuBarPanelView: View {
             }
             HStack(spacing: 10) {
                 PanelMetricCard(title: "网速", icon: "arrow.down.circle.fill", value: formatRateShort(service.snapshot.networkDown), color: .blue)
-                PanelMetricCard(title: "温度", icon: "thermometer", value: service.snapshot.temperature != nil ? String(format: "%.0f°", service.snapshot.temperature!) : "—", color: .orange)
+                PanelMetricCard(title: "温度", icon: "thermometer", value: service.snapshot.temperature.map { String(format: "%.0f°", $0) } ?? "—", color: .orange)
             }
             // 迷你趋势
             Card {

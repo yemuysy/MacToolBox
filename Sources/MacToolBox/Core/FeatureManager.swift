@@ -61,11 +61,7 @@ final class FeatureManager: ObservableObject {
         persist()
     }
 
-    func toggle(_ id: FeatureID) {
-        setEnabled(id, !isEnabled(id))
-    }
 
-    // MARK: - 持久化
 
     private func persist() {
         ConfigStore.shared.setFeatureStates(enabledIDs.map { $0.rawValue })

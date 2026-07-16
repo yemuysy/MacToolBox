@@ -10,6 +10,7 @@ final class SystemInfoService: ObservableObject, @unchecked Sendable {
     /// 用于计算 CPU 使用率差值
     private var lastCPU: host_cpu_load_info = host_cpu_load_info()
     private var lastUpdateTime: Date = .distantPast
+    private var hasFirstCPUSample = false
 
     /// 网速采样差值
     private var lastNetIn: UInt64 = 0
@@ -270,6 +271,12 @@ final class SystemInfoService: ObservableObject, @unchecked Sendable {
         let cur = info
         let prev = lastCPU
         lastCPU = cur
+
+        // 首次采样：lastCPU 为零值，差值无意义，跳过本轮
+        if !hasFirstCPUSample {
+            hasFirstCPUSample = true
+            return 0
+        }
 
         let user = Double(cur.cpu_ticks.0 - prev.cpu_ticks.0)
         let system = Double(cur.cpu_ticks.1 - prev.cpu_ticks.1)

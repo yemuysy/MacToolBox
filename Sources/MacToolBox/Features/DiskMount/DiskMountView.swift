@@ -118,7 +118,7 @@ struct DiskMountView: View {
         var points: [String: String] = [:]
         for disk in service.diskList {
             let key = disk.volumeName ?? disk.bsdName
-            points[key] = disk.mountPoint?.isEmpty == false ? disk.mountPoint! : "/Volumes/\(disk.volumeName ?? disk.bsdName)"
+            points[key] = disk.mountPoint.flatMap { $0.isEmpty ? nil : $0 } ?? "/Volumes/\(disk.volumeName ?? disk.bsdName)"
         }
         volumeMountPoints = points
     }

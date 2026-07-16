@@ -78,11 +78,14 @@ struct RightClickActionHandlers {
     static func deleteDirectly(_ targets: [URL]) {
         guard !targets.isEmpty else { return }
         let guarded: [String] = ["/System", "/usr", "/bin", "/sbin", "/etc", "/private/var", "/Library/Apple", "/Applications"]
-        for u in targets where guarded.contains(where: { u.path.hasPrefix($0) }) {
+        let isSystem = { (u: URL) in guarded.contains(where: { u.path.hasPrefix($0) }) }
+        let unsafe = targets.filter(isSystem)
+        let safe = targets.filter { !isSystem($0) }
+        for u in unsafe {
             rcLog("RightClick: refused delete of system path \(u.path)")
-            return
         }
-        let names = targets.map { $0.lastPathComponent }.joined(separator: "、")
+        guard !safe.isEmpty else { return }
+        let names = safe.map { $0.lastPathComponent }.joined(separator: "、")
         let alert = NSAlert()
         alert.messageText = "永久删除文件"
         alert.informativeText = "将直接删除（不进废纸篓）：\n\(names)\n此操作不可撤销。"
@@ -90,7 +93,7 @@ struct RightClickActionHandlers {
         alert.addButton(withTitle: "删除")
         alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        for u in targets {
+        for u in safe {
             do { try FileManager.default.removeItem(at: u) }
             catch { rcLog("RightClick: delete failed \(u.path): \(error.localizedDescription)") }
         }

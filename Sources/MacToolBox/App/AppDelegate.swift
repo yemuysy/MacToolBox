@@ -275,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             parts.append("↑\(formatRateShort(snap.networkUp))")
         }
         if cfg.showTemperature {
-            parts.append(snap.temperature != nil ? String(format: "%.0f°", snap.temperature!) : "—")
+            parts.append(snap.temperature.map { String(format: "%.0f°", $0) } ?? "—")
         }
 
         let text = parts.joined(separator: " ")

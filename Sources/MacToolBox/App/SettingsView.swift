@@ -196,7 +196,7 @@ struct SettingsView: View {
             parts.append("↑\(formatRateShort(snap.networkUp))")
         }
         if config.showTemperature {
-            parts.append(snap.temperature != nil ? String(format: "%.0f°", snap.temperature!) : "—")
+            parts.append(snap.temperature.map { String(format: "%.0f°", $0) } ?? "—")
         }
         return parts.isEmpty ? "(无)" : parts.joined(separator: " ")
     }

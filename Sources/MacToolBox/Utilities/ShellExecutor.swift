@@ -28,9 +28,11 @@ enum ShellExecutor {
             return ("", error.localizedDescription, -1)
         }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdoutData: Data
+        let stderrData: Data
         task.waitUntilExit()
+        stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
 
         let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

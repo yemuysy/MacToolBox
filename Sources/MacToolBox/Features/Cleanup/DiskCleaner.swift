@@ -26,13 +26,6 @@ enum CleanupCategory: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    var colorName: String {
-        switch self {
-        case .system: return "orange"
-        case .application: return "blue"
-        case .internet: return "green"
-        }
-    }
 }
 
 /// 风险等级，决定默认是否勾选。
