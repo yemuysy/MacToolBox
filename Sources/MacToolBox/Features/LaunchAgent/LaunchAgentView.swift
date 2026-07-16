@@ -8,6 +8,7 @@ import AppKit
 struct LaunchAgentView: View {
     @ObservedObject private var service = LaunchAgentService.shared
     @State private var searchText: String = ""
+    @State private var collapsedScopes: Set<LaunchItemScope> = []
 
     /// 分组顺序：用户级在前，系统级、系统锁定在后。
     private let sectionOrder: [LaunchItemScope] = [.user, .system, .systemReadOnly]
@@ -70,16 +71,39 @@ struct LaunchAgentView: View {
                     ForEach(sectionOrder, id: \.self) { scope in
                         let list = filtered.filter { $0.scope == scope }
                         if !list.isEmpty {
-                            SectionHeader(title: "\(scope.displayName)（\(list.count)）", icon: scopeIcon(scope))
-                            VStack(spacing: 0) {
-                                ForEach(list) { item in
-                                    row(item)
-                                    if item.id != list.last?.id {
-                                        Divider()
+                            let collapsed = collapsedScopes.contains(scope)
+                            // 可折叠分组头
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if collapsed { collapsedScopes.remove(scope) }
+                                    else { collapsedScopes.insert(scope) }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: scopeIcon(scope))
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.accentStart)
+                                    SectionHeader(title: "\(scope.displayName)（\(list.count)）", icon: "")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            if !collapsed {
+                                VStack(spacing: 0) {
+                                    ForEach(list) { item in
+                                        row(item)
+                                        if item.id != list.last?.id {
+                                            Divider()
+                                        }
                                     }
                                 }
+                                .padding(.bottom, 8)
                             }
-                            .padding(.bottom, 8)
                         }
                     }
                 }

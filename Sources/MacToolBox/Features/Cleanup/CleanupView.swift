@@ -295,6 +295,7 @@ private struct AppGroup: Identifiable {
 private struct SourceCard: View {
     let section: SourceSection
     @Binding var selected: Set<URL>
+    @State private var isExpanded = true
 
     private var sectionURLSet: Set<URL> { Set(section.items.map { $0.url }) }
     private var selectedInSection: Set<URL> { selected.intersection(sectionURLSet) }
@@ -304,55 +305,70 @@ private struct SourceCard: View {
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill((section.needsAdmin ? Color.orange : Theme.accentStart).opacity(0.12))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: section.needsAdmin ? "lock.fill" : "folder.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(section.needsAdmin ? .orange : Theme.accentStart)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(section.source)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            if section.needsAdmin {
-                                Text("需管理员")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 1)
-                                    .background(Color.orange.opacity(0.15))
-                                    .foregroundStyle(.orange)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                            }
+                // 标题行（始终显示，点击可折叠）
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill((section.needsAdmin ? Color.orange : Theme.accentStart).opacity(0.12))
+                                .frame(width: 36, height: 36)
+                            Image(systemName: section.needsAdmin ? "lock.fill" : "folder.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(section.needsAdmin ? .orange : Theme.accentStart)
                         }
-                        Text("\(section.items.count) 项 · \(section.appGroups.count) 个来源")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text(section.source)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                if section.needsAdmin {
+                                    Text("需管理员")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 1)
+                                        .background(Color.orange.opacity(0.15))
+                                        .foregroundStyle(.orange)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                            }
+                            Text("\(section.items.count) 项 · \(section.appGroups.count) 个来源")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text(formatBytes(section.totalSize))
+                            .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.primary)
+
+                        // 折叠箭头
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 20)
+
+                        // 全选按钮
+                        Button {
+                            toggleSection()
+                        } label: {
+                            Image(systemName: selectionIcon)
+                                .font(.system(size: 18))
+                                .foregroundStyle(selectionColor)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(section.items.isEmpty)
                     }
-
-                    Spacer()
-
-                    Text(formatBytes(section.totalSize))
-                        .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.primary)
-
-                    Button {
-                        toggleSection()
-                    } label: {
-                        Image(systemName: selectionIcon)
-                            .font(.system(size: 18))
-                            .foregroundStyle(selectionColor)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(section.items.isEmpty)
+                    .padding(12)
+                    .contentShape(Rectangle())
                 }
-                .padding(12)
+                .buttonStyle(.plain)
 
-                if !section.appGroups.isEmpty {
+                // 展开内容：应用子列表
+                if isExpanded && !section.appGroups.isEmpty {
                     Divider()
                     VStack(spacing: 0) {
                         ForEach(section.appGroups) { group in
