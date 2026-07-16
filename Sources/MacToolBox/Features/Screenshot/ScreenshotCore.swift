@@ -14,10 +14,10 @@ enum CaptureMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// 截图流程编排：把「捕获 → 标注编辑 / 贴图 / 直接保存」串起来，供快捷键与主界面调用。
+/// 截图流程编排：把「捕获 → 贴图 / 直接保存」串起来，供快捷键与主界面调用。
 ///
 /// 设计：捕获由 `CaptureSession`（基于 CGDisplayCreateImage，正确处理多屏与窗口吸附）完成；
-/// 标注编辑由 `AnnotationEditorController` 完成；贴图由 `PinManager` 完成。
+/// 贴图由 `PinManager` 完成；选区后的保存/复制由 `CaptureSession.Delegate` 直接处理。
 /// 本枚举只做编排，不触碰具体绘制逻辑。
 enum ScreenshotFlow {
     /// 检查屏幕录制权限（CGDisplayStream 在有权限时非 nil）。
@@ -55,8 +55,8 @@ enum ScreenshotFlow {
 
     /// 统一入口。
     /// - mode: 捕获模式。
-    /// - pin: true 时捕获后直接贴图，不进编辑器。
-    /// - autoSaveDir: 非 nil 时捕获后直接保存到该目录（不进编辑器）。
+    /// - pin: true 时捕获后直接贴图，不弹工具条。
+    /// - autoSaveDir: 非 nil 时捕获后直接保存到该目录（不弹工具条）。
     /// - onSaved: 直接保存成功后的回调（主线程）。
     @MainActor static func start(mode: CaptureMode, pin: Bool = false,
                      autoSaveDir: URL? = nil, onSaved: ((URL) -> Void)? = nil) {
@@ -72,7 +72,11 @@ enum ScreenshotFlow {
                 let url = dir.appendingPathComponent(Self.buildFilename())
                 if savePNG(result.image, to: url) { onSaved?(url) }
             } else {
-                AnnotationEditorController.edit(result.image)
+                // 编辑功能已移除：无目的地时默认保存到桌面，避免截图被静默丢弃
+                let dir = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+                    ?? URL(fileURLWithPath: NSHomeDirectory())
+                let url = dir.appendingPathComponent(Self.buildFilename())
+                if savePNG(result.image, to: url) { onSaved?(url) }
             }
         }
     }

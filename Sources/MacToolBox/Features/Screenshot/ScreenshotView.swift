@@ -8,7 +8,7 @@ struct ScreenshotView: View {
     @State private var autoSave = false
     @State private var saveDir: URL
     @State private var recent: [SavedShot] = []
-    @State private var status: String = "选择模式后开始截图（区域模式：拖拽选区 → 自动进入标注编辑器）"
+    @State private var status: String = "选择模式后开始截图（区域模式：拖拽选区 → 弹出工具条保存/复制）"
     @State private var isBusy = false
     @State private var hasPermission = ScreenshotFlow.checkPermission()
     /// 最近一次捕获保存的文件（用于「贴图」按钮）
@@ -26,7 +26,7 @@ struct ScreenshotView: View {
                 TabHeaderCard(
                     icon: "camera.viewfinder",
                     title: "截图",
-                    subtitle: "区域 / 全屏 / 窗口 · 捕获后进入标注编辑器 · 支持贴图"
+                    subtitle: "区域 / 全屏 / 窗口 · 捕获后弹出工具条（保存/复制/取消）· 支持贴图"
                 )
 
                 // 权限引导（无屏幕录制权限时显示）
@@ -48,7 +48,7 @@ struct ScreenshotView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-                        Text("区域/窗口：拖拽或单击目标窗口捕获，随后进入标注编辑器（箭头/矩形/文字/序号/马赛克/画笔）。全屏：直接截取当前屏。")
+                        Text("区域/窗口：拖拽框选或单击目标窗口捕获，随后弹出工具条（保存/复制/取消）。全屏：直接截取光标所在屏并保存到默认位置。")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -59,7 +59,7 @@ struct ScreenshotView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: "保存位置", icon: "tray.and.arrow.down")
-                        Toggle("截图后直接保存到默认位置（不弹编辑器）", isOn: $autoSave)
+                        Toggle("截图后直接保存到默认位置（不弹工具条）", isOn: $autoSave)
                             .toggleStyle(.switch)
                         Divider().padding(.leading, 4)
                         HStack(spacing: 8) {
@@ -74,7 +74,7 @@ struct ScreenshotView: View {
                             Button("更改…") { chooseDir() }
                                 .controlSize(.small)
                         }
-                        Text("默认位置同时作为「保存到…」面板的初始目录。开启上方开关则截图后直接落盘，否则进入编辑器手动保存/复制/贴图/OCR。")
+                        Text("默认位置同时作为「保存到…」面板的初始目录。开启上方开关则截图后直接落盘；否则选区后弹出工具条，手动保存/复制/取消。")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -267,10 +267,10 @@ struct ScreenshotView: View {
                 }
             }
         } else {
-            // 进入选区 → 浮动工具条（完成/保存/复制/取消）→ 编辑器
+            // 进入选区 → 浮动工具条（保存/复制/取消）
             ScreenshotFlow.start(mode: mode, pin: false, autoSaveDir: saveDir) { _ in }
             isBusy = false
-            status = "框选区域后，用选区下方的工具条完成 / 保存 / 复制"
+            status = "框选区域后，用选区下方的工具条保存 / 复制 / 取消"
         }
     }
 }

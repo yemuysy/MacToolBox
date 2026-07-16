@@ -101,7 +101,6 @@ final class SelectionView: NSView {
         bar.layer?.borderColor = NSColor.separatorColor.cgColor
         bar.isHidden = true
         let items: [(String, String, Selector)] = [
-            ("完成", "checkmark.circle.fill", #selector(actFinish)),
             ("保存", "square.and.arrow.down", #selector(actSave)),
             ("复制", "doc.on.doc", #selector(actCopy)),
             ("取消", "xmark.circle", #selector(actCancel)),
@@ -149,7 +148,7 @@ final class SelectionView: NSView {
         let p = convert(event.locationInWindow, from: nil)
         hideConfirmBar()
         if event.clickCount == 2, state == .selected, let r = rect, r.contains(p) {
-            delegate?.selectionDidComplete(rect: r, isWindow: false)
+            delegate?.selectionDidSave(rect: r)
             return
         }
         if state == .idle, let hov = hoverRect {
@@ -203,7 +202,7 @@ final class SelectionView: NSView {
             if let w = pendingWindow {
                 pendingWindow = nil
                 rect = w; state = .selected; drag = .none
-                delegate?.selectionDidComplete(rect: w, isWindow: true)
+                showConfirmBar(for: w)
                 needsDisplay = true
                 return
             }
@@ -392,11 +391,6 @@ final class SelectionView: NSView {
         confirmBar.frame = NSRect(x: x, y: y, width: bw, height: bh)
     }
 
-    @objc private func actFinish() {
-        guard let r = rect, state == .selected else { return }
-        hideConfirmBar()
-        delegate?.selectionDidComplete(rect: r, isWindow: false)
-    }
     @objc private func actSave() {
         guard let r = rect, state == .selected else { return }
         hideConfirmBar()
@@ -414,7 +408,7 @@ final class SelectionView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { actCancel(); return }                          // Esc → 取消（任意状态）
-        if state == .selected, event.keyCode == 36 { actFinish(); return }      // Return → 完成
+        if state == .selected, event.keyCode == 36 { actSave(); return }        // Return → 保存
         super.keyDown(with: event)
     }
 
@@ -428,7 +422,6 @@ final class SelectionView: NSView {
 @MainActor protocol SelectionViewDelegate: AnyObject {
     func selectionDidStart()
     func selectionDidChange(rect: NSRect)
-    func selectionDidComplete(rect: NSRect, isWindow: Bool)
     func selectionDidSave(rect: NSRect)
     func selectionDidCopy(rect: NSRect)
     func selectionCancelled()
@@ -515,27 +508,6 @@ final class OverlayWindow: NSWindow {
                                 sourceRect: NSRect(x: 0, y: 0, width: CGFloat(cg.width), height: CGFloat(cg.height))))
     }
 
-    // MARK: - 长截图入口：截取最上层窗口完整可见图（v1，待接滚动拼接）
-
-    nonisolated static func captureFrontmostWindowFull() -> NSImage? {
-        guard let infoList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly], kCGNullWindowID
-        ) as? [[String: Any]] else { return nil }
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let candidates: [(CGWindowID, CGRect, Int)] = infoList.compactMap { info in
-            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != ownPID,
-                  let boundsNS = info[kCGWindowBounds as String] as? NSDictionary,
-                  let layer = info[kCGWindowLayer as String] as? Int else { return nil }
-            var rect = CGRect.zero
-            guard CGRectMakeWithDictionaryRepresentation(boundsNS as CFDictionary, &rect) else { return nil }
-            let id = info[kCGWindowNumber as String] as? CGWindowID ?? 0
-            return (id, rect, layer)
-        }
-        guard let top = candidates.max(by: { $0.2 < $1.2 }) else { return nil }
-        guard let cg = CGWindowListCreateImage(top.1, .optionIncludingWindow, top.0, .bestResolution) else { return nil }
-        return imageFrom(cg)
-    }
-
     // MARK: - 权限 / 工具
 
     static func checkScreenRecordingPermission() -> Bool {
@@ -587,16 +559,6 @@ final class OverlayWindow: NSWindow {
             for o in overlays { o.screenCtx.cgImage = nil }
         }
         func selectionDidChange(rect: NSRect) {}
-        func selectionDidComplete(rect: NSRect, isWindow: Bool) {
-            guard !state.finished else { return }
-            state.finished = true
-            // 必须先 crop 取图（overlay/screenCtx/cgImage 还活着），再 orderOut + release + freeScreens
-            let image = overlay.screenCtx.crop(rect)
-            for o in overlays { o.orderOut(nil) }
-            freeScreens()
-            CaptureSession.release(state: state)
-            completion(image.map { CaptureResult(image: $0, sourceRect: rect) })
-        }
         func selectionCancelled() {
             guard !state.finished else { return }
             state.finished = true
