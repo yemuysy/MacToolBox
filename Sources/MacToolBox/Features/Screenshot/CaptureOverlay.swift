@@ -483,6 +483,7 @@ final class OverlayWindow: NSWindow {
             let delegate = Delegate(overlay: o, overlays: overlays, state: state,
                                     defaultSaveDir: defaultSaveDir, completion: completion)
             o.selectionView.delegate = delegate
+            retainedDelegates.append(delegate)   // 强引用，防止 run() 返回后 Delegate 被释放致工具条按钮失效
             o.beginDetection()
             o.makeKeyAndOrderFront(nil)
             o.makeFirstResponder(o.selectionView)
@@ -543,6 +544,13 @@ final class OverlayWindow: NSWindow {
 
     // MARK: - 会话状态 / 代理
 
+    /// 强引用活动中的 Delegate，避免 run() 返回后 Delegate 被 ARC 释放
+    /// （SelectionView.delegate 是 weak），否则用户稍后点工具条按钮时 delegate 已为 nil、遮罩关不掉。
+    private static var retainedDelegates: [Delegate] = []
+    private static func release(state: SessionState) {
+        retainedDelegates.removeAll { $0.state === state }
+    }
+
     /// 跨叠层共享的「已结束」标记，避免多屏误触发多次完成。
     final class SessionState { var finished = false }
 
@@ -564,6 +572,7 @@ final class OverlayWindow: NSWindow {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
+            CaptureSession.release(state: state)
             if let img = overlay.screenCtx.crop(rect) {
                 completion(CaptureResult(image: img, sourceRect: rect))
             } else {
@@ -574,6 +583,7 @@ final class OverlayWindow: NSWindow {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
+            CaptureSession.release(state: state)
             completion(nil)
         }
 
@@ -581,6 +591,7 @@ final class OverlayWindow: NSWindow {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
+            CaptureSession.release(state: state)
             if let img = overlay.screenCtx.crop(rect) {
                 let dir = defaultSaveDir
                     ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
@@ -595,6 +606,7 @@ final class OverlayWindow: NSWindow {
             guard !state.finished else { return }
             state.finished = true
             for o in overlays { o.orderOut(nil) }
+            CaptureSession.release(state: state)
             if let img = overlay.screenCtx.crop(rect) {
                 let pb = NSPasteboard.general
                 pb.clearContents()
