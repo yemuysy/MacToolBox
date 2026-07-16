@@ -1,10 +1,16 @@
 import SwiftUI
+import AppKit
 
-/// 启动项管理界面：列出 ~/Library/LaunchAgents 中的 plist，
-/// 支持「备份禁用」（移入 Backup 目录）与「恢复」。
+/// 启动项管理界面（照 KnockKnock 思路，按作用域分组枚举多位置）。
+/// - 用户级：备份禁用 / 恢复
+/// - 系统级：App 内不可改，提供复制 launchctl 命令
+/// - 系统锁定：仅展示
 struct LaunchAgentView: View {
     @ObservedObject private var service = LaunchAgentService.shared
     @State private var searchText: String = ""
+
+    /// 分组顺序：用户级在前，系统级、系统锁定在后。
+    private let sectionOrder: [LaunchItemScope] = [.user, .system, .systemReadOnly]
 
     var body: some View {
         ScrollView {
@@ -22,7 +28,7 @@ struct LaunchAgentView: View {
         TabHeaderCard(
             icon: "power",
             title: "启动项",
-            subtitle: "LaunchAgents · 备份禁用可一键恢复"
+            subtitle: "LaunchAgent / LaunchDaemon · 照 KnockKnock 枚举多位置"
         ) {
             if service.isBusy {
                 ProgressView().controlSize(.small)
@@ -43,8 +49,6 @@ struct LaunchAgentView: View {
     private var listCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "登录项", icon: "list.bullet")
-
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
@@ -57,19 +61,25 @@ struct LaunchAgentView: View {
                 .background(Theme.cardBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                let list = filtered
-                if list.isEmpty {
-                    Text(service.items.isEmpty ? "未找到任何 LaunchAgent。" : "无匹配项。")
+                if filtered.isEmpty {
+                    Text(service.items.isEmpty ? "未找到任何启动项。" : "无匹配项。")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 12)
                 } else {
-                    VStack(spacing: 0) {
-                        ForEach(list) { item in
-                            row(item)
-                            if item.id != list.last?.id {
-                                Divider()
+                    ForEach(sectionOrder, id: \.self) { scope in
+                        let list = filtered.filter { $0.scope == scope }
+                        if !list.isEmpty {
+                            SectionHeader(title: "\(scope.displayName)（\(list.count)）", icon: scopeIcon(scope))
+                            VStack(spacing: 0) {
+                                ForEach(list) { item in
+                                    row(item)
+                                    if item.id != list.last?.id {
+                                        Divider()
+                                    }
+                                }
                             }
+                            .padding(.bottom, 8)
                         }
                     }
                 }
@@ -81,6 +91,9 @@ struct LaunchAgentView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    Image(systemName: item.kind.icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
                     Text(item.label)
                         .font(.system(size: 13, weight: .medium))
                     if item.runAtLoad {
@@ -101,8 +114,17 @@ struct LaunchAgentView: View {
                             .foregroundStyle(.orange)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
+                    if item.scope != .user {
+                        Text(item.scope.displayName)
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(item.scope == .systemReadOnly ? Color.gray.opacity(0.18) : Color.orange.opacity(0.15))
+                            .foregroundStyle(item.scope == .systemReadOnly ? Color.secondary : Color.orange)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
                 }
-                Text(item.programArguments.joined(separator: " ") )
+                Text(item.programArguments.joined(separator: " "))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -110,30 +132,60 @@ struct LaunchAgentView: View {
             }
             Spacer()
 
-            if item.disabled {
+            HStack(spacing: 8) {
+                // 在 Finder 中定位
                 Button {
-                    service.restore(fileName: item.fileURL.lastPathComponent)
+                    reveal(item)
                 } label: {
-                    Text("恢复")
-                        .font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "folder")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(Theme.accentEnd)
-            } else {
-                Button {
-                    service.disable(item)
-                } label: {
-                    Text("禁用")
-                        .font(.system(size: 12, weight: .semibold))
+                .buttonStyle(.borderless)
+                .help("在 Finder 中显示")
+
+                if item.scope == .user {
+                    if item.disabled {
+                        Button {
+                            service.restore(fileName: item.fileURL.lastPathComponent)
+                        } label: {
+                            Text("恢复")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(Theme.accentEnd)
+                    } else {
+                        Button {
+                            service.disable(item)
+                        } label: {
+                            Text("禁用")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.orange)
+                    }
+                } else {
+                    // 系统级/只读：复制 launchctl 命令
+                    Button {
+                        copyCommand(service.launchctlCommand(for: item, action: "unload"))
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("复制 launchctl 命令到剪贴板")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.orange)
             }
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+    }
+
+    private func scopeIcon(_ scope: LaunchItemScope) -> String {
+        switch scope {
+        case .user: return "person.circle"
+        case .system: return "building.2"
+        case .systemReadOnly: return "lock.shield"
+        }
     }
 
     private var filtered: [LaunchItem] {
@@ -142,5 +194,16 @@ struct LaunchAgentView: View {
             $0.label.localizedCaseInsensitiveContains(searchText)
                 || $0.programArguments.joined(separator: " ").localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    private func reveal(_ item: LaunchItem) {
+        NSWorkspace.shared.selectFile(item.fileURL.path,
+                                      inFileViewerRootedAtPath: item.fileURL.deletingLastPathComponent().path)
+    }
+
+    private func copyCommand(_ cmd: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(cmd, forType: .string)
     }
 }
