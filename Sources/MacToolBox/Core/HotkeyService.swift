@@ -147,21 +147,34 @@ final class HotkeyService: @unchecked Sendable {
     private func quickCapture(_ mode: CaptureMode, pin: Bool) {
         let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory())
-        let captureThenPin: (CaptureMode, CGRect?) -> Void = { m, rect in
-            let result = ScreenshotEngine.capture(m, region: rect,
-                                                  saveToClipboard: false, directory: desktop)
-            if pin, case .success(let url) = result, let url {
-                PinnedImageManager.shared.pin(url: url)
+        let handle: (CaptureMode, CGRect?) -> Void = { m, rect in
+            let result = ScreenshotEngine.capture(m, region: rect)
+            switch result {
+            case .success(let shot):
+                if pin {
+                    // 直接贴图，不需要落盘文件
+                    PinnedImageManager.shared.pin(shot.image)
+                    ScreenshotEngine.cleanup(shot)
+                } else {
+                    // 与 UI 一致：截图后弹预览面板，让用户决定保存到哪 / 复制 / 显示
+                    ScreenshotPreviewController.shared.show(
+                        shot: shot,
+                        defaultDirectory: desktop,
+                        onSaved: { _ in }
+                    )
+                }
+            case .failure:
+                break
             }
         }
         if mode == .region {
             RegionSelector.begin { rect in
                 Task { @MainActor in
-                    if let rect { captureThenPin(.region, rect) }
+                    if let rect { handle(.region, rect) }
                 }
             }
         } else {
-            captureThenPin(mode, nil)
+            handle(mode, nil)
         }
     }
 

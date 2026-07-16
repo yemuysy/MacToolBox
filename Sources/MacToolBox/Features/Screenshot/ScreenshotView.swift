@@ -5,7 +5,7 @@ import Combine
 /// 截图功能界面：模式（全屏/区域/窗口）+ 保存位置（文件/剪贴板）+ 快捷键展示 + 贴图 + 最近截图。
 struct ScreenshotView: View {
     @State private var mode: CaptureMode = .region
-    @State private var saveToClipboard = false
+    @State private var autoSave = false
     @State private var saveDir: URL
     @State private var recent: [SavedShot] = []
     @State private var status: String = "选择模式后开始截图（区域模式：拖拽选区 → 拖动/调整 → Enter 确认）"
@@ -55,23 +55,25 @@ struct ScreenshotView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         SectionHeader(title: "保存位置", icon: "tray.and.arrow.down")
-                        Toggle("复制到剪贴板（不保存文件）", isOn: $saveToClipboard)
+                        Toggle("截图后直接保存到默认位置（不弹预览面板）", isOn: $autoSave)
                             .toggleStyle(.switch)
-                        if !saveToClipboard {
-                            Divider().padding(.leading, 4)
-                            HStack(spacing: 8) {
-                                Image(systemName: "folder")
-                                    .foregroundStyle(.secondary)
-                                Text(saveDir.path)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer()
-                                Button("更改…") { chooseDir() }
-                                    .controlSize(.small)
-                            }
+                        Divider().padding(.leading, 4)
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder")
+                                .foregroundStyle(.secondary)
+                            Text(saveDir.path)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            Button("更改…") { chooseDir() }
+                                .controlSize(.small)
                         }
+                        Text("默认位置同时作为「保存到…」面板的初始目录。关闭上方开关则截图后弹出预览，可另选路径或复制到剪贴板。")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -269,22 +271,33 @@ struct ScreenshotView: View {
 
     @MainActor
     private func performCapture(region: CGRect?) {
-        let result = ScreenshotEngine.capture(
-            mode,
-            region: region,
-            saveToClipboard: saveToClipboard,
-            directory: saveDir
-        )
+        let result = ScreenshotEngine.capture(mode, region: region)
         isBusy = false
         switch result {
-        case .success(let url):
-            if let url {
-                recent.insert(SavedShot(url: url, mode: mode, date: Date()), at: 0)
-                recent = Array(recent.prefix(12))
-                lastCapturedURL = url
-                status = "已保存到 \(url.lastPathComponent)"
+        case .success(let shot):
+            if autoSave {
+                let dest = saveDir.appendingPathComponent(ScreenshotEngine.buildFilename())
+                if ScreenshotEngine.save(shot, to: dest) {
+                    ScreenshotEngine.cleanup(shot)
+                    recent.insert(SavedShot(url: dest, mode: mode, date: Date()), at: 0)
+                    recent = Array(recent.prefix(12))
+                    lastCapturedURL = dest
+                    status = "已保存到 \(dest.lastPathComponent)"
+                } else {
+                    status = "保存失败：无法写入 \(dest.path)"
+                }
             } else {
-                status = "已复制到剪贴板"
+                ScreenshotPreviewController.shared.show(
+                    shot: shot,
+                    defaultDirectory: saveDir,
+                    onSaved: { url in
+                        recent.insert(SavedShot(url: url, mode: mode, date: Date()), at: 0)
+                        recent = Array(recent.prefix(12))
+                        lastCapturedURL = url
+                        status = "已保存到 \(url.lastPathComponent)"
+                    }
+                )
+                status = "已截图，请在预览面板选择保存方式"
             }
         case .failure(let err):
             if let shotErr = err as? ScreenshotEngine.ScreenshotError,

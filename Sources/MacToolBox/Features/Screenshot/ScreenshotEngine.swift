@@ -17,6 +17,9 @@ enum CaptureMode: String, CaseIterable, Identifiable, Codable {
 /// 截图引擎。
 /// 设计原则：纯几何/文件名/PNG 编码为静态纯函数（可在沙盒测试中验证，无副作用）；
 /// 实际捕获基于系统 `screencapture`（正确处理多屏、菜单栏、窗口阴影），仅在真实 App 主线程调用。
+///
+/// 捕获流程：先截到临时 PNG（`CapturedShot`），再由预览面板决定「保存到文件 / 复制到剪贴板 / 在访达显示」，
+/// 不再在引擎内部静默落盘，给用户在截图后选择保存方式的机会。
 struct ScreenshotEngine {
 
     // MARK: - 纯函数（可单测，无副作用、无 AppKit 依赖）
@@ -64,17 +67,18 @@ struct ScreenshotEngine {
 
     // MARK: - 实际捕获（@MainActor，真实 App 调用）
 
+    /// 一次捕获的结果：原始图像 + 临时 PNG 路径。
+    /// 预览 / 保存到文件 / 复制到剪贴板都基于它，关闭后由 `cleanup(_:)` 删除临时文件。
+    struct CapturedShot {
+        let image: NSImage
+        let tempURL: URL
+    }
+
     @MainActor
     static func capture(
         _ mode: CaptureMode,
-        region: CGRect? = nil,
-        saveToClipboard: Bool,
-        directory: URL
-    ) -> Result<URL?, Error> {
-        let outputURL: URL? = saveToClipboard
-            ? nil
-            : directory.appendingPathComponent(buildFilename())
-
+        region: CGRect? = nil
+    ) -> Result<CapturedShot, Error> {
         // 预先检查屏幕录制权限
         guard checkScreenRecordingPermission() else {
             return .failure(ScreenshotError.noPermission)
@@ -94,7 +98,7 @@ struct ScreenshotEngine {
             args = ["-w"]   // 捕获当前最前面的窗口（非交互）
         }
 
-        return runScreencapture(arguments: args, outputURL: outputURL)
+        return runScreencapture(arguments: args)
     }
 
     /// 检查当前进程是否有屏幕录制权限（通过尝试创建 CGDisplayStream 判断）。
@@ -114,48 +118,69 @@ struct ScreenshotEngine {
     }
 
     @MainActor
-    private static func runScreencapture(arguments: [String], outputURL: URL?) -> Result<URL?, Error> {
-        let tmp = (outputURL ?? FileManager.default.temporaryDirectory
+    private static func runScreencapture(arguments: [String]) -> Result<CapturedShot, Error> {
+        // 总是先截到临时文件，保存/复制/预览交给调用方决定
+        let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("png"))
+            .appendingPathExtension("png")
         let (_, stderr, code) = ShellExecutor.run("/usr/sbin/screencapture",
                                                   arguments: arguments + ["-x", tmp.path])
         guard code == 0 else {
             return .failure(ScreenshotError.captureFailed(stderr))
         }
-        if let outputURL {
-            return .success(outputURL)
+        guard let data = try? Data(contentsOf: tmp),
+              let image = NSImage(data: data) else {
+            return .failure(ScreenshotError.decodeFailed)
         }
-        // 剪贴板模式：读取临时文件写入系统剪贴板
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        guard let data = try? Data(contentsOf: tmp) else {
-            return .failure(ScreenshotError.clipboardFailed)
+        return .success(CapturedShot(image: image, tempURL: tmp))
+    }
+
+    // MARK: - 保存 / 复制 / 清理
+
+    /// 把一次捕获保存到指定文件（复制临时 PNG 到目标路径，目标已存在则覆盖）。
+    static func save(_ shot: CapturedShot, to url: URL) -> Bool {
+        do {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: url.path) {
+                try fm.removeItem(at: url)
+            }
+            try fm.copyItem(at: shot.tempURL, to: url)
+            return true
+        } catch {
+            return false
         }
-        guard let image = NSImage(data: data) else {
-            return .failure(ScreenshotError.clipboardFailed)
-        }
+    }
+
+    /// 把一次捕获写入系统剪贴板（PNG + TIFF + NSImage 三种形式，最大化兼容「粘贴」）。
+    static func writeToClipboard(_ shot: CapturedShot) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        // 同时写入 PNG 和 TIFF 两种格式，确保最多应用能粘贴
-        pb.setData(data, forType: .png)
-        if let tiffData = image.tiffRepresentation {
-            pb.setData(tiffData, forType: .tiff)
+        if let data = try? Data(contentsOf: shot.tempURL) {
+            pb.setData(data, forType: .png)
         }
-        // 通过 NSImage 写为 object，兼容「粘贴」和 NSImageView 等场景
-        pb.writeObjects([image])
-        return .success(nil)
+        if let tiff = shot.image.tiffRepresentation {
+            pb.setData(tiff, forType: .tiff)
+        }
+        pb.writeObjects([shot.image])
+    }
+
+    /// 清理临时文件（保存完成或关闭预览时调用）。
+    static func cleanup(_ shot: CapturedShot) {
+        try? FileManager.default.removeItem(at: shot.tempURL)
     }
 
     enum ScreenshotError: LocalizedError {
         case invalidRegion
         case captureFailed(String)
         case clipboardFailed
+        case decodeFailed
         case noPermission
         var errorDescription: String? {
             switch self {
             case .invalidRegion:       return "选区无效"
             case .captureFailed(let s): return "截图失败：\(s)"
             case .clipboardFailed:     return "写入剪贴板失败"
+            case .decodeFailed:        return "截图数据解码失败"
             case .noPermission:        return "无屏幕录制权限"
             }
         }

@@ -76,6 +76,7 @@ swiftc \
     -framework IOKit \
     -framework OSLog \
     -framework Carbon \
+    -framework UniformTypeIdentifiers \
     -framework CryptoKit \
     -o "$BUILD_DIR/$APP_NAME" \
     $SWIFT_FILES

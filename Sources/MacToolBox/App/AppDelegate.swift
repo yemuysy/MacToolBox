@@ -122,6 +122,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                 keyEquivalent: "q"))
         mainMenu.addItem(appMenuItem)
 
+        // 文件菜单（含标准「关闭窗口」cmd+W，走系统 performClose，等同于点红色 X）
+        let fileMenuItem = NSMenuItem()
+        fileMenuItem.submenu = NSMenu(title: "文件")
+        let closeItem = NSMenuItem(title: "关闭窗口",
+                                   action: #selector(NSWindow.performClose(_:)),
+                                   keyEquivalent: "w")
+        fileMenuItem.submenu?.addItem(closeItem)
+        mainMenu.addItem(fileMenuItem)
+
         // 编辑菜单（保留复制粘贴等标准操作）
         let editMenuItem = NSMenuItem()
         editMenuItem.submenu = NSMenu(title: "编辑")
