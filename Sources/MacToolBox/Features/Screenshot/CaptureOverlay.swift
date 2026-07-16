@@ -69,6 +69,8 @@ final class SelectionView: NSView {
     weak var delegate: SelectionViewDelegate?
     var detector: WindowDetector?
     var screenCtx: ScreenContext?
+    /// 贴图模式：选中后直接裁图并回调，不弹确认工具条。
+    var pinMode: Bool = false
 
     private enum State { case idle, drawing, selected }
     private enum Drag { case none, drawNew, move, resize(Handle) }
@@ -202,7 +204,7 @@ final class SelectionView: NSView {
             if let w = pendingWindow {
                 pendingWindow = nil
                 rect = w; state = .selected; drag = .none
-                showConfirmBar(for: w)
+                finishSelection(w)
                 needsDisplay = true
                 return
             }
@@ -212,11 +214,11 @@ final class SelectionView: NSView {
                 return
             }
             state = .selected; drag = .none
-            showConfirmBar(for: r)
+            finishSelection(r)
             needsDisplay = true
         case .move, .resize:
             drag = .none
-            if let r = rect { showConfirmBar(for: r) }
+            if let r = rect { finishSelection(r) }
             needsDisplay = true
         case .none: break
         }
@@ -380,6 +382,15 @@ final class SelectionView: NSView {
     private func hideConfirmBar() {
         confirmBar.isHidden = true
     }
+    /// 选区完成：贴图模式直接回调选区，普通模式弹确认工具条。
+    private func finishSelection(_ r: NSRect) {
+        if pinMode {
+            hideConfirmBar()
+            delegate?.selectionDidSave(rect: r)
+        } else {
+            showConfirmBar(for: r)
+        }
+    }
     private func layoutConfirmBar(for r: NSRect) {
         let bw: CGFloat = 240
         let bh: CGFloat = 36
@@ -465,7 +476,8 @@ final class OverlayWindow: NSWindow {
 @MainActor final class CaptureSession {
     /// 开始一次截图捕获。
     /// - mode: .region/.window 显示叠层（含窗口吸附，单击窗口即捕）；.full 直接截取光标所在屏。
-    static func run(mode: CaptureMode = .region, defaultSaveDir: URL? = nil,
+    /// - pin: true 时区域/窗口模式选中即直接贴图（不弹确认工具条）。
+    static func run(mode: CaptureMode = .region, defaultSaveDir: URL? = nil, pin: Bool = false,
                     completion: @escaping (CaptureResult?) -> Void) {
         guard checkScreenRecordingPermission() else {
             completion(nil); return
@@ -487,8 +499,9 @@ final class OverlayWindow: NSWindow {
         let state = SessionState()
         for o in overlays {
             let delegate = Delegate(overlay: o, overlays: overlays, state: state,
-                                    defaultSaveDir: defaultSaveDir, completion: completion)
+                                    defaultSaveDir: defaultSaveDir, pin: pin, completion: completion)
             o.selectionView.delegate = delegate
+            o.selectionView.pinMode = pin
             retainedDelegates.append(delegate)   // 强引用，防止 run() 返回后 Delegate 被释放致工具条按钮失效
             o.beginDetection()
             o.makeKeyAndOrderFront(nil)
@@ -545,11 +558,12 @@ final class OverlayWindow: NSWindow {
         let state: SessionState
         let completion: (CaptureResult?) -> Void
         let defaultSaveDir: URL?
+        let pin: Bool
         init(overlay: OverlayWindow, overlays: [OverlayWindow], state: SessionState,
-             defaultSaveDir: URL? = nil,
+             defaultSaveDir: URL? = nil, pin: Bool = false,
              completion: @escaping (CaptureResult?) -> Void) {
             self.overlay = overlay; self.overlays = overlays; self.state = state
-            self.defaultSaveDir = defaultSaveDir; self.completion = completion
+            self.defaultSaveDir = defaultSaveDir; self.pin = pin; self.completion = completion
         }
         func selectionDidStart() {}
 
@@ -575,6 +589,11 @@ final class OverlayWindow: NSWindow {
             for o in overlays { o.orderOut(nil) }
             freeScreens()
             CaptureSession.release(state: state)
+            // 贴图模式：把裁好的图交回上层，由 ScreenshotFlow 调用 PinManager 贴出
+            if pin, let img = image {
+                completion(CaptureResult(image: img, sourceRect: rect))
+                return
+            }
             if let img = image {
                 let dir = defaultSaveDir
                     ?? FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
