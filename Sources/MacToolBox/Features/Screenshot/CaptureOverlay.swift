@@ -405,11 +405,13 @@ final class SelectionView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if state == .selected {
-            if event.keyCode == 36 { actFinish(); return }   // Return → 完成
-            if event.keyCode == 53 { actCancel(); return }   // Esc → 取消
-        }
+        if event.keyCode == 53 { actCancel(); return }                          // Esc → 取消（任意状态）
+        if state == .selected, event.keyCode == 36 { actFinish(); return }      // Return → 完成
         super.keyDown(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        actCancel()   // 右键 → 取消
     }
 }
 
@@ -428,6 +430,9 @@ final class SelectionView: NSView {
 
 final class OverlayWindow: NSWindow {
     let screenCtx: ScreenContext
+    // borderless 窗口默认 canBecomeKey=false，导致 makeKeyAndOrderFront 无法生效、keyDown 收不到 Esc
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
     private(set) lazy var selectionView: SelectionView = {
         let v = SelectionView(frame: NSRect(origin: .zero, size: screenCtx.screen.frame.size))
         v.screenCtx = screenCtx
