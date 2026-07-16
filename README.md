@@ -6,7 +6,7 @@
 
 ## 功能
 
-底座由 9 个功能模块组成，每个都可在「功能开关」中独立启用 / 关闭（关闭后既不进侧边栏，也绝不实例化对应 Service，从源头省内存）。
+底座由 11 个功能模块组成，每个都可在「功能开关」中独立启用 / 关闭（关闭后既不进侧边栏，也绝不实例化对应 Service，从源头省内存）。
 
 | 功能 ID | 名称 | 图标 | 默认 | 说明 |
 |---------|------|------|------|------|
@@ -19,10 +19,14 @@
 | `cleanup` | 垃圾清理 | `trash.fill` | 开 | 按 **系统 / 应用 / 上网** 垃圾分组，默认仅选安全项，分批清理（`actor` 隔离） |
 | `launchAgent` | 启动项 | `power` | 开 | LaunchAgent/Daemon plist 解析与管理 |
 | `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件或剪贴板 |
+| `scrollControl` | 滚轮控制 | `computermouse` | 关 | 鼠标滚轮反向 + 平滑滚动，触控板豁免 |
+| `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单：新建文件 / 复制路径 / 用 App 打开 / 删除 / 隐藏 / 常用目录 |
 
-新增重点能力：
+核心能力：
 
 - **截图**：内置区域拖选遮罩（半透明 + 挖空选区），绕过系统截图的不便。
+- **滚轮控制**：基于 `CGEventTap` 的全局滚轮拦截引擎，支持反向 + 平滑滚动 + 触控板豁免。
+- **右键增强**：Finder Sync 扩展注入右键菜单（新建文件 / 复制路径 / 用 App 打开 / 直接删除 / 隐藏显示 / 常用目录），瘦扩展模式：扩展只渲染菜单，操作在主进程执行。
 - **全局快捷键**：基于 Carbon `RegisterEventHotKey`，零依赖、免辅助功能权限。支持区域截图 / 全屏截图 / 窗口截图 / 切换主窗口 / 打开概览，绑定可在「设置」中录制。
 - **功能开关**：只启用需要的功能，主界面才出现对应入口；未启用功能的 Service 绝不实例化，降低常驻内存。
 - **特权扩展点**：`PrivilegedOperations` 协议 + `UserSpacePrivilegedOperations` 普通权限实现，为未来特权 Helper（深层系统清理、受保护目录删除）预留干净接口。
@@ -49,39 +53,48 @@ MacToolBox/
 │   ├── Info.plist                        # LSUIElement=false（显示 Dock）
 │   ├── AppIcon.icns / MenuBarIcon.png
 │   └── IconMaster.png                    # 图标母版
-├── Sources/MacToolBox/
-│   ├── App/                              # 应用外壳层（@main 入口 + 委托 + 窗口/面板/设置）
-│   │   ├── MacToolBoxApp.swift           # @main 入口（仅创建 AppDelegate）
-│   │   ├── AppDelegate.swift             # NSApplicationDelegate；窗口/面板/快捷键生命周期
-│   │   ├── MenuBarRootView.swift         # 主窗口根视图：侧边栏导航（由 FeatureManager 驱动）
-│   │   ├── MenuBarPanelView.swift        # 菜单栏弹出面板（核心指标 + 快捷操作网格）
-│   │   └── SettingsView.swift            # 设置：功能开关 + 全局快捷键录制 UI
-│   ├── Core/                             # 核心层（与具体功能解耦的引擎）
-│   │   ├── FeatureID.swift               # 功能枚举（CaseIterable 单一真相）
-│   │   ├── FeatureManager.swift          # 功能注册表 + 启用解析 + 惰性实例化控制
-│   │   ├── Hotkey.swift                  # 快捷键模型（Carbon 掩码 / Codable / 显示串）
-│   │   ├── HotkeyService.swift           # 全局快捷键服务（RegisterEventHotKey 注册/分发）
-│   │   └── PrivilegedOperations.swift   # 特权操作协议 + 普通权限实现（Helper 扩展点）
-│   ├── Features/                         # 功能层（每个功能一个目录，含 Service + View）
-│   │   ├── Overview/      OverviewView.swift
-│   │   ├── DiskMount/     DiskMountService.swift  + DiskMountView.swift
-│   │   ├── MetalHUD/      MetalHUDService.swift   + MetalHUDView.swift
-│   │   ├── AppLaunch/     AppLaunchMonitorService.swift + AppLaunchMonitorView.swift + AppLaunchRecord.swift
-│   │   ├── FolderMap/     FolderMapService.swift  + FolderMapView.swift
-│   │   ├── Brew/          BrewService.swift       + BrewView.swift
-│   │   ├── Cleanup/       DiskCleaner.swift(actor) + CleanupClassifier + CleanupService.swift + CleanupView.swift
-│   │   ├── LaunchAgent/   LaunchAgentService.swift + LaunchAgentView.swift
-│   │   └── Screenshot/    ScreenshotEngine.swift  + RegionSelector.swift + ScreenshotView.swift
-│   ├── Services/                          # 跨功能的共享服务
-│   │   └── SystemInfoService.swift        # mach + sysctl + ioreg + SMC 温度（@Published 快照：平均 + 最热核心，后台读取）
-│   ├── Shared/                           # 跨功能共享 UI
-│   │   ├── Components.swift               # 主题/卡片/标签栏/进度条/格式化器
-│   │   └── Sparkline.swift                # 迷你趋势图
-│   └── Utilities/                        # 基础设施
-│       ├── ConfigStore.swift              # JSON 持久化（config.json + 独立 features.json）
-│       ├── Logger.swift                   # OSLog
-│       ├── ShellExecutor.swift            # Process 封装
-│       └── SMCReader.swift                # Apple Silicon SMC 温度读取（移植自 Stats）
+├── Sources/
+│   ├── MacToolBox/
+│   │   ├── App/                          # 应用外壳层（@main 入口 + 委托 + 窗口/面板/设置）
+│   │   │   ├── MacToolBoxApp.swift       # @main 入口（仅创建 AppDelegate）
+│   │   │   ├── AppDelegate.swift         # NSApplicationDelegate；窗口/面板/快捷键生命周期
+│   │   │   ├── MenuBarRootView.swift     # 主窗口根视图：侧边栏导航（由 FeatureManager 驱动）
+│   │   │   ├── MenuBarPanelView.swift    # 菜单栏弹出面板（核心指标 + 快捷操作网格）
+│   │   │   └── SettingsView.swift        # 设置：功能开关 + 全局快捷键录制 UI
+│   │   ├── Core/                         # 核心层（与具体功能解耦的引擎）
+│   │   │   ├── FeatureID.swift           # 功能枚举（CaseIterable 单一真相）
+│   │   │   ├── FeatureManager.swift      # 功能注册表 + 启用解析 + 惰性实例化控制
+│   │   │   ├── Hotkey.swift              # 快捷键模型（Carbon 掩码 / Codable / 显示串）
+│   │   │   ├── HotkeyService.swift       # 全局快捷键服务（RegisterEventHotKey 注册/分发）
+│   │   │   └── PrivilegedOperations.swift # 特权操作协议 + 普通权限实现（Helper 扩展点）
+│   │   ├── Features/                     # 功能层（每个功能一个目录，含 Service + View）
+│   │   │   ├── Overview/       OverviewView.swift
+│   │   │   ├── DiskMount/      DiskMountService.swift  + DiskMountView.swift
+│   │   │   ├── MetalHUD/       MetalHUDService.swift   + MetalHUDView.swift
+│   │   │   ├── AppLaunch/      AppLaunchMonitorService.swift + AppLaunchMonitorView.swift + AppLaunchRecord.swift
+│   │   │   ├── FolderMap/      FolderMapService.swift  + FolderMapView.swift
+│   │   │   ├── Brew/           BrewService.swift       + BrewView.swift
+│   │   │   ├── Cleanup/        DiskCleaner.swift(actor) + CleanupClassifier + CleanupService.swift + CleanupView.swift
+│   │   │   ├── LaunchAgent/    LaunchAgentService.swift + LaunchAgentView.swift
+│   │   │   ├── Screenshot/     ScreenshotEngine.swift  + RegionSelector.swift + ScreenshotView.swift + PinnedImageManager.swift
+│   │   │   ├── ScrollControl/  ScrollControlService.swift + ScrollEvent.swift + ScrollPoster.swift + ScrollControlView.swift
+│   │   │   └── RightClick/     RightClickService.swift  + RightClickModels.swift + RightClickActionHandlers.swift + RightClickView.swift
+│   │   ├── Services/                     # 跨功能的共享服务
+│   │   │   └── SystemInfoService.swift   # mach + sysctl + ioreg + SMC 温度（@Published 快照：平均 + 最热核心，后台读取）
+│   │   ├── Shared/                      # 跨功能共享 UI
+│   │   │   ├── Components.swift          # 主题/卡片/标签栏/进度条/格式化器
+│   │   │   └── Sparkline.swift           # 迷你趋势图
+│   │   └── Utilities/                   # 基础设施
+│   │       ├── ConfigStore.swift         # JSON 持久化（config.json + 独立 features.json）
+│   │       ├── Logger.swift              # OSLog
+│   │       ├── ShellExecutor.swift       # Process 封装
+│   │       └── SMCReader.swift           # Apple Silicon SMC 温度读取（移植自 Stats）
+│   ├── FinderSyncExt/                   # Finder Sync 扩展（右键增强的独立进程）
+│   │   ├── FinderSyncExt.swift          # FIFinderSync 子类：菜单渲染 + 点击转发
+│   │   ├── Info.plist                   # NSExtension 声明
+│   │   └── FinderSyncExt.entitlements   # 扩展 entitlements（沙盒 + App Group）
+│   └── Shared/                          # 主程序与扩展共用的 IPC 层
+│       └── RightClickShared.swift       # 消息类型 + RCMessager（DistributedNotificationCenter + SHA256 签名）
 └── Tests/                                # 沙盒测试层（每个功能一个测试，纯逻辑可单测）
     ├── TestMain.swift                     # @main 测试入口（同步 + 异步 actor 汇总）
     ├── ScreenshotEngineTests.swift        # clampRegion / buildFilename / pngData
@@ -222,7 +235,7 @@ Carbon `RegisterEventHotKey` 在 `HotkeyService` 内注册；系统按键事件�
 - **多核心平均**：取一组核心 die 温度传感器（`Tp*/Tc*/Te*/Tg*`）有效读数求平均，过滤电源门控占位假值（idle 时某些核心读出 ~5°C）。
 - **最热核心 + 平均**：`SystemInfoService.snapshot` 同时提供 `temperature`（多核心平均，EMA 平滑）与 `temperatureHottest`（最热核心），概览页一并展示；温度读取在后台串行队列完成，**不阻塞主线程**。
 - **时间平滑**：`SystemInfoService` 内 EMA（系数 0.3）抹平抖动；读不到时保留上一帧，UI 不闪「—」。
-- 详细原理见 **[Docs/Temperature-SMC.md](Docs/Temperature-SMC.md)**。
+- 详细原理见 **[docs/Temperature-SMC.md](docs/Temperature-SMC.md)**、**[docs/RightClick-Architecture.md](docs/RightClick-Architecture.md)**、**[docs/ScrollControl-Architecture.md](docs/ScrollControl-Architecture.md)**。
 
 ## 系统要求
 

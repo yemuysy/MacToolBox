@@ -10,6 +10,7 @@ struct ScreenshotView: View {
     @State private var recent: [SavedShot] = []
     @State private var status: String = "选择模式后开始截图"
     @State private var isBusy = false
+    @State private var hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
     /// 最近一次捕获保存的文件（用于「贴图」按钮）
     @State private var lastCapturedURL: URL?
 
@@ -27,6 +28,11 @@ struct ScreenshotView: View {
                     title: "截图",
                     subtitle: "区域 / 全屏 / 窗口 · 保存文件或剪贴板 · 支持贴图"
                 )
+
+                // 权限引导（无屏幕录制权限时显示）
+                if !hasPermission {
+                    permissionGuideCard
+                }
 
                 // 快捷键展示（独立子视图，快捷键变更时只重渲染该卡而非整页）
                 HotkeySection()
@@ -122,6 +128,9 @@ struct ScreenshotView: View {
             .padding(18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
+        }
     }
 
     /// 快捷键展示子视图：把 `.hotkeyBindingsChanged` 监听收敛到本卡内部，
@@ -191,6 +200,41 @@ struct ScreenshotView: View {
         }
     }
 
+    // MARK: - 权限引导
+
+    /// 屏幕录制权限引导卡片：检测到无权限时显示，引导用户前往系统设置授权。
+    private var permissionGuideCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeader(title: "屏幕录制权限", icon: "shield.slash")
+                Text("截图需要屏幕录制权限。请在系统设置中授予 MacToolBox 权限，然后点击下方按钮刷新。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label("打开系统设置", systemImage: "gearshape")
+                    }
+                    .controlSize(.small)
+                    Button {
+                        hasPermission = ScreenshotEngine.checkScreenRecordingPermission()
+                        if hasPermission {
+                            status = "权限已就绪"
+                        }
+                    } label: {
+                        Label("刷新权限状态", systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                    Spacer()
+                }
+            }
+        }
+    }
+
     // MARK: - 行为
 
     private func chooseDir() {
@@ -243,6 +287,10 @@ struct ScreenshotView: View {
                 status = "已复制到剪贴板"
             }
         case .failure(let err):
+            if let shotErr = err as? ScreenshotEngine.ScreenshotError,
+               case .noPermission = shotErr {
+                hasPermission = false
+            }
             status = err.localizedDescription
         }
     }

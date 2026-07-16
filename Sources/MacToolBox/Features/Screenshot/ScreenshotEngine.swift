@@ -75,6 +75,11 @@ struct ScreenshotEngine {
             ? nil
             : directory.appendingPathComponent(buildFilename())
 
+        // 预先检查屏幕录制权限
+        guard checkScreenRecordingPermission() else {
+            return .failure(ScreenshotError.noPermission)
+        }
+
         var args: [String] = []
         switch mode {
         case .full:
@@ -90,6 +95,22 @@ struct ScreenshotEngine {
         }
 
         return runScreencapture(arguments: args, outputURL: outputURL)
+    }
+
+    /// 检查当前进程是否有屏幕录制权限（通过尝试创建 CGDisplayStream 判断）。
+    /// - Returns: `true` 有权限，`false` 无权限。
+    static func checkScreenRecordingPermission() -> Bool {
+        // CGDisplayStream 在有权限时返回非 nil，无权限时返回 nil
+        let stream = CGDisplayStream(
+            display: CGMainDisplayID(),
+            outputWidth: 1,
+            outputHeight: 1,
+            pixelFormat: Int32(kCVPixelFormatType_32BGRA),
+            properties: nil,
+            queue: DispatchQueue.global(),
+            handler: { _, _, _, _ in }
+        )
+        return stream != nil
     }
 
     @MainActor
@@ -110,9 +131,20 @@ struct ScreenshotEngine {
         guard let data = try? Data(contentsOf: tmp) else {
             return .failure(ScreenshotError.clipboardFailed)
         }
+        guard let image = NSImage(data: data) else {
+            return .failure(ScreenshotError.clipboardFailed)
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
+        // 同时写入 PNG 和 TIFF 两种格式，确保最多应用能粘贴
         pb.setData(data, forType: .png)
+        if let tiffData = image.tiffRepresentation {
+            pb.setData(tiffData, forType: .tiff)
+        }
+        // 通过 NSImage 写为 object，兼容「粘贴」和 NSImageView 等场景
+        pb.writeObjects([image])
+        // 确保数据已刷新到共享剪贴板
+        pb.flush()
         return .success(nil)
     }
 
@@ -120,11 +152,13 @@ struct ScreenshotEngine {
         case invalidRegion
         case captureFailed(String)
         case clipboardFailed
+        case noPermission
         var errorDescription: String? {
             switch self {
-            case .invalidRegion:     return "选区无效"
+            case .invalidRegion:       return "选区无效"
             case .captureFailed(let s): return "截图失败：\(s)"
-            case .clipboardFailed:   return "写入剪贴板失败"
+            case .clipboardFailed:     return "写入剪贴板失败"
+            case .noPermission:        return "无屏幕录制权限"
             }
         }
     }
