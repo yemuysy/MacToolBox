@@ -18,5 +18,8 @@ xcuserdata/
 *.log
 log/
 
+# Packaging output (DMG)
+dist/
+
 # Local runtime data (user-specific, never committed)
 Application Support/MacToolBox/
