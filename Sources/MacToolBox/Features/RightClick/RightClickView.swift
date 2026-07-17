@@ -48,13 +48,12 @@ struct RightClickView: View {
 
     private var statusText: String {
         if !config.enabled { return "已关闭" }
-        // ad-hoc 签名下扩展不会注册，extensionAlive 永远 false，改用中性文案
-        return "仅 NSServices 路线"
+        return service.extensionAlive ? "已接入" : "待开启文件提供程序"
     }
 
     private var statusColor: Color {
         if !config.enabled { return .secondary }
-        return .blue   // 中性蓝,表示「可用但需要走 NSServices」
+        return service.extensionAlive ? .green : .orange
     }
 
     // MARK: - 启用引导
@@ -62,19 +61,25 @@ struct RightClickView: View {
     private var guideCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "Finder 右键集成说明", icon: "puzzlepiece.extension")
-                Text("当前 ad-hoc 签名版本的 Finder Sync 扩展**不会被系统注册**——打开「系统设置 → 扩展 → Finder」看不到 MacToolBox，所以本版本只能走「服务」子菜单路线：Finder 右键任意文件 → 服务 → 「MacToolBox：xxx」。\n\n要让 Finder 一级菜单直接出现，需用 Apple Developer ID Application 证书重新签名（¥688/年），详见 build.sh 顶部 SIGN_IDENTITY 说明。")
+                SectionHeader(title: "启用 Finder 扩展（一级菜单）", icon: "puzzlepiece.extension")
+                Text("Finder Sync 扩展已被系统识别并安装，但 macOS 14+ 把它归类在「登录项 → 文件提供程序」里，且默认关闭。开启步骤：\n1. 打开「系统设置 → 通用 → 登录项」；\n2. 找到「MacToolBox 扩展」，打开「文件提供程序」开关；\n3. 回到本页,扩展状态会变绿。\n\n如果完全看不到「MacToolBox 扩展」,说明 FinderSyncExt 没被 pkd 加载,试着重启电脑或执行: `pluginkit -e use -i com.yemu.mactoolbox.FinderSyncExt`。\n\n**免签名的服务子菜单路线**仍可用: Finder 右键任意文件 → 服务 → 「MacToolBox：xxx」。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
                     Button {
-                        openExtensionsSettings()
+                        openLoginItemsSettings()
                     } label: {
-                        Label("打开系统设置", systemImage: "gearshape")
+                        Label("打开登录项设置", systemImage: "gearshape")
                     }
                     .controlSize(.small)
-                    .help("即便看不到 MacToolBox 也建议打开看看，验证一下当前签名下确实没注册")
+                    Button {
+                        registerExtensionManually()
+                    } label: {
+                        Label("手动注册扩展", systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                    .help("运行 pluginkit -e use -i <bundleID> 让 pkd 立刻加载扩展")
                     Button {
                         revealInFinder()
                     } label: {
@@ -85,6 +90,29 @@ struct RightClickView: View {
                 }
             }
         }
+    }
+
+    /// 打开 macOS 14+ 的「登录项」设置页(扩展被归类到「文件提供程序」)
+    private func openLoginItemsSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// 让 pkd 立刻加载扩展（无需重启）
+    private func registerExtensionManually() {
+        let task = Process()
+        task.launchPath = "/usr/bin/pluginkit"
+        task.arguments = ["-e", "use", "-i", "com.yemu.mactoolbox.FinderSyncExt"]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            rcLog("RightClick: manual pluginkit registration triggered (exit=\(task.terminationStatus))")
+        } catch {
+            rcLog("RightClick: pluginkit failed: \(error.localizedDescription)")
+        }
+        // 触发配置重新下发,扩展接上后会自动请求
+        service.publishMenuConfig()
     }
 
     // MARK: - 新建文件
@@ -294,7 +322,7 @@ struct RightClickView: View {
         Card {
             VStack(alignment: .leading, spacing: 6) {
                 SectionHeader(title: "说明", icon: "info.circle")
-                Text("• 当前 ad-hoc 签名版本的 Finder Sync 扩展不会被系统注册，「系统设置 → 扩展 → Finder」里看不到 MacToolBox。\n• 本版本只能通过 Finder 右键 → 服务 → 「MacToolBox：xxx」使用（功能完整，配置在主程序）。\n• 想让 Finder 一级菜单直接出现，需要 Apple Developer ID Application 证书（¥688/年）重新签名 FinderSyncExt。\n• 直接删除为危险操作，已加系统路径守卫与确认弹窗。")
+                Text("• Finder Sync 扩展会被系统识别,但 macOS 14+ 把它放在「系统设置 → 通用 → 登录项 → 文件提供程序」,默认关闭,需手动开启一次。\n• 走 NSServices「服务」子菜单也能用(无需开启),Finder 右键 → 服务 → 「MacToolBox：xxx」。\n• 扩展仅渲染菜单并转发点击,所有文件操作在主程序执行。\n• 直接删除为危险操作,已加系统路径守卫与确认弹窗。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
