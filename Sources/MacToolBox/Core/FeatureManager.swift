@@ -138,7 +138,7 @@ final class FeatureManager: ObservableObject {
             FeatureDefinition(
                 id: .rightClick, title: "右键增强", icon: "rectangle.on.folder",
                 isCore: false, defaultEnabled: false
-            ) { AnyView(RightClickView().onAppear { RightClickService.shared.pushMenuConfig() }) },
+            ) { AnyView(RightClickView().onAppear { RightClickService.shared.publishMenuConfig() }) },
         ]
     }
 }

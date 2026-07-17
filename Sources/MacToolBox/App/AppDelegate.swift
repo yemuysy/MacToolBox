@@ -407,12 +407,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch action {
             case "copyPath":
                 if cfg.showCopyPath { RightClickActionHandlers.copyPaths(urls) }
+            case "copyName":
+                if cfg.showCopyName { RightClickActionHandlers.copyNames(urls) }
             case "newFile":
                 if cfg.showNewFile { RightClickActionHandlers.createNewFile(type: cfg.newFileTypes.first, targets: urls, targetedDir: nil) }
+            case "newFileFromTemplate":
+                if cfg.showNewFileFromTemplate, let first = cfg.templateFiles.first {
+                    RightClickActionHandlers.newFileFromTemplate(name: first, targets: urls, targetedDir: nil, templateFolder: cfg.templateFolder)
+                }
             case "openWith":
                 if cfg.showOpenWith, let first = cfg.openWithApps.first {
                     RightClickActionHandlers.openWith(bundleID: first.bundleID, targets: urls)
                 }
+            case "openInTerminal":
+                if cfg.showOpenInTerminal { RightClickActionHandlers.openInTerminal(targets: urls, terminalBundleID: cfg.terminalBundleID) }
+            case "revealInFinder":
+                if cfg.showRevealInFinder { RightClickActionHandlers.revealInFinder(urls) }
             case "delete":
                 if cfg.showDelete { RightClickActionHandlers.deleteDirectly(urls) }
             case "toggleHidden":

@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// 右键增强设置页：主开关 + 启用引导 + 新建类型 / 用 App 打开 / 常用目录 / 动作开关。
+/// 右键增强设置页：主开关 + 启用引导 + 新建文件 / 模板 / 复制 / 打开 / 常用目录 / 动作开关。
+/// 架构对标开源右键增强（RightKit / SaneClick / Flicker）：Finder Sync 扩展注入一级菜单，
+/// 配置经 App Group 共享文件下发；同时提供 NSServices「服务」子菜单免费路线（免签名）。
 struct RightClickView: View {
     @StateObject private var service = RightClickService.shared
 
@@ -12,7 +14,8 @@ struct RightClickView: View {
                 header
                 guideCard
                 newFileCard
-                openWithCard
+                templateCard
+                openCard
                 commonDirsCard
                 actionsCard
                 tipCard
@@ -20,7 +23,7 @@ struct RightClickView: View {
             }
             .padding(16)
         }
-        .onAppear { service.pushMenuConfig() }
+        .onAppear { service.publishMenuConfig() }
     }
 
     // MARK: - 头部
@@ -29,7 +32,7 @@ struct RightClickView: View {
         TabHeaderCard(
             icon: "rectangle.on.folder",
             title: "右键增强",
-            subtitle: "Finder 右键菜单：新建文件 / 复制路径 / 用 App 打开 / 删除 / 隐藏 / 常用目录"
+            subtitle: "Finder 右键：新建/模板/复制/打开/显示/删除/隐藏/常用目录"
         ) {
             HStack(spacing: 10) {
                 StatusPill(text: statusText, color: statusColor)
@@ -58,8 +61,8 @@ struct RightClickView: View {
     private var guideCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "启用 Finder 扩展", icon: "puzzlepiece.extension")
-                Text("右键菜单由独立的 Finder Sync 扩展提供，需手动启用一次：\n1. 将 MacToolBox 放到 /Applications；\n2. 打开「系统设置 → 扩展 → Finder」，开启 MacToolBox；\n3. 在本页打开上方开关。")
+                SectionHeader(title: "启用 Finder 扩展（一级菜单）", icon: "puzzlepiece.extension")
+                Text("右键一级菜单由独立的 Finder Sync 扩展提供，需手动启用一次：\n1. 将 MacToolBox 放到 /Applications；\n2. 打开「系统设置 → 扩展 → Finder」，开启 MacToolBox；\n3. 在本页打开上方开关。\n\n免签名替代：不启用扩展也能用——Finder 右键「服务」子菜单里的「MacToolBox：xxx」即本功能（免费路线）。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -105,12 +108,61 @@ struct RightClickView: View {
         }
     }
 
-    // MARK: - 用 App 打开
+    // MARK: - 从模板新建
 
-    private var openWithCard: some View {
+    private var templateCard: some View {
         Card {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "用 App 打开", icon: "app.dock")
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(title: "从模板新建", icon: "doc.on.doc.fill")
+                toggleRow("启从模板新建", icon: "doc.on.doc.fill",
+                          desc: "把模板目录里的文件一键复制到当前目录（RightKit 标志性功能）",
+                          isOn: Binding(
+                            get: { config.showNewFileFromTemplate },
+                            set: { v in service.update { $0.showNewFileFromTemplate = v } }))
+                Divider().padding(.leading, 4)
+                HStack(spacing: 8) {
+                    Button {
+                        if config.templateFolder == nil { service.scanDefaultTerminal() }
+                        pickTemplateFolder()
+                    } label: { Label("选择模板目录…", systemImage: "folder.badge.plus") }
+                        .controlSize(.small)
+                    Spacer()
+                }
+                if let folder = config.templateFolder {
+                    Text(folder)
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if config.templateFiles.isEmpty {
+                        Text("该目录暂无可见文件。").font(.system(size: 11)).foregroundStyle(.secondary)
+                    } else {
+                        Text("模板（\(config.templateFiles.count)）：")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(config.templateFiles, id: \.self) { name in
+                                    Text(name)
+                                        .font(.system(size: 11))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(Theme.cardBackground)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text("尚未选择模板目录。").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - 用 App 打开 / 终端
+
+    private var openCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(title: "打开方式", icon: "app.dock")
                 Toggle("显示「用 App 打开」", isOn: Binding(
                     get: { config.showOpenWith },
                     set: { v in service.update { $0.showOpenWith = v } }
@@ -140,6 +192,23 @@ struct RightClickView: View {
                             .buttonStyle(.borderless)
                         }
                     }
+                }
+
+                Divider().padding(.leading, 4)
+
+                Toggle("显示「在终端打开」", isOn: Binding(
+                    get: { config.showOpenInTerminal },
+                    set: { v in service.update { $0.showOpenInTerminal = v } }
+                ))
+                .toggleStyle(.switch)
+                HStack(spacing: 8) {
+                    Text("终端程序：\(service.terminalName())")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        pickTerminal()
+                    } label: { Label("更改…", systemImage: "pencil") }
+                        .controlSize(.small)
                 }
             }
         }
@@ -192,6 +261,18 @@ struct RightClickView: View {
                             get: { config.showCopyPath },
                             set: { v in service.update { $0.showCopyPath = v } }))
                 Divider().padding(.leading, 4)
+                toggleRow("复制文件名", icon: "character.textbox",
+                          desc: "把选中项文件名（不含路径）写入剪贴板",
+                          isOn: Binding(
+                            get: { config.showCopyName },
+                            set: { v in service.update { $0.showCopyName = v } }))
+                Divider().padding(.leading, 4)
+                toggleRow("在 Finder 中显示", icon: "eye.fill",
+                          desc: "在 Finder 中定位并选中选中项",
+                          isOn: Binding(
+                            get: { config.showRevealInFinder },
+                            set: { v in service.update { $0.showRevealInFinder = v } }))
+                Divider().padding(.leading, 4)
                 toggleRow("直接删除", icon: "trash",
                           desc: "跳过废纸篓删除（带确认弹窗，系统路径受保护）",
                           isOn: Binding(
@@ -211,7 +292,7 @@ struct RightClickView: View {
         Card {
             VStack(alignment: .leading, spacing: 6) {
                 SectionHeader(title: "说明", icon: "info.circle")
-                Text("• 扩展需手动在「系统设置 → 扩展 → Finder」中开启一次；之后由主程序自动推送菜单配置。\n• 扩展仅渲染菜单并转发点击，所有文件操作在主程序执行。\n• 直接删除为危险操作，已加系统路径守卫与确认弹窗。")
+                Text("• Finder Sync 扩展需手动在「系统设置 → 扩展 → Finder」开启一次；配置经 App Group 共享文件下发，Finder 重启也稳定。\n• 不启用扩展也能用：Finder 右键「服务」子菜单里的「MacToolBox：xxx」即本功能（免签名）。\n• 扩展仅渲染菜单并转发点击，所有文件操作在主程序执行。\n• 直接删除为危险操作，已加系统路径守卫与确认弹窗。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -263,6 +344,31 @@ struct RightClickView: View {
         }
         if panel.runModal() == .OK {
             for url in panel.urls { service.addApp(url) }
+        }
+    }
+
+    private func pickTerminal() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [.application]
+        } else {
+            panel.allowedFileTypes = ["app"]
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            service.setTerminal(url)
+        }
+    }
+
+    private func pickTemplateFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            service.setTemplateFolder(url)
         }
     }
 

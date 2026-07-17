@@ -10,6 +10,8 @@ struct RightClickTests {
         check(cfg.enabled == false, "RightClickConfig 默认未启用")
         check(cfg.newFileTypes == ["txt", "md", "json", "csv"], "默认新建类型")
         check(cfg.showNewFile && cfg.showCopyPath && cfg.showOpenWith, "默认动作开关")
+        check(cfg.showCopyName && cfg.showOpenInTerminal && cfg.showRevealInFinder && cfg.showNewFileFromTemplate, "默认新增动作开关")
+        check(cfg.templateFolder == nil, "默认模板目录为空")
 
         // 签名 round-trip
         let payload = "hello-world"
@@ -17,13 +19,19 @@ struct RightClickTests {
         check(RCMessager.verify(payload: payload, signature: sig), "签名校验通过")
         check(!RCMessager.verify(payload: payload, signature: "tampered"), "篡改签名被拒")
 
-        // 菜单配置映射
+        // 菜单配置映射（含新增字段）
         var c = RightClickConfig()
         c.enabled = true
         c.newFileTypes = ["txt", "md"]
+        c.templateFolder = "/tmp/templates"
+        c.templateFiles = ["readme.md", "notes.txt"]
+        c.terminalBundleID = "com.googlecode.iterm2"
         let menu = RCMenuConfig(from: c)
         check(menu.enabled == true, "RCMenuConfig.enabled 映射")
         check(menu.newFileTypes == ["txt", "md"], "RCMenuConfig 类型映射")
+        check(menu.templateFolder == "/tmp/templates", "RCMenuConfig 模板目录映射")
+        check(menu.templateFiles == ["readme.md", "notes.txt"], "RCMenuConfig 模板文件映射")
+        check(menu.terminalBundleID == "com.googlecode.iterm2", "RCMenuConfig 终端映射")
         if let j = menu.toJSON(),
            let back = try? JSONDecoder().decode(RCMenuConfig.self, from: Data(j.utf8)) {
             check(back.enabled == true, "RCMenuConfig 解码还原")

@@ -97,6 +97,54 @@
 			<key>NSSendTypes</key>
 			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：复制文件名</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>copyName</string>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：在终端打开</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>openInTerminal</string>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：在 Finder 中显示</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>revealInFinder</string>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>MacToolBox：从模板新建</string></dict>
+			<key>NSMessage</key>
+			<string>rightClickService</string>
+			<key>NSPortName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>NSUserData</key>
+			<string>newFileFromTemplate</string>
+			<key>NSSendTypes</key>
+			<array><string>NSFilenamesPboardType</string></array>
+		</dict>
 	</array>
 </dict>
 </plist>
