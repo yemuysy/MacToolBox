@@ -18,15 +18,15 @@
 | `brew` | Homebrew | `mug` | 开 | 已装/可清理/过期包查询 |
 | `cleanup` | 垃圾清理 | `trash.fill` | 关 | 按 **系统 / 应用 / 上网** 垃圾分组，默认仅选安全项，分批清理（`actor` 隔离） |
 | `launchAgent` | 启动项 | `power` | 关 | LaunchAgent/Daemon plist 解析与管理 |
-| `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件或剪贴板 |
+| `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件 / 剪贴板，或**贴图**悬浮窗（拖动 / 缩放 / 关闭） |
 | `scrollControl` | 滚轮控制 | `computermouse` | 关 | 鼠标滚轮反向 + 平滑滚动，触控板豁免 |
-| `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单：新建文件 / 复制路径 / 用 App 打开 / 删除 / 隐藏 / 常用目录 |
+| `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单（10 项）：新建文件 / 从模板新建 / 复制路径 / 复制文件名 / 用 App 打开 / 在终端打开 / 在 Finder 显示 / 直接删除 / 隐藏显示 / 常用目录 |
 
 核心能力：
 
-- **截图**：内置区域拖选遮罩（半透明 + 挖空选区），绕过系统截图的不便。
+- **截图**：基于 `CGDisplayCreateImage` 逐屏合成 + 无边框叠层遮罩，区域拖选 / 窗口吸附 / 全屏三模式；选区后浮动工具条（保存 / 复制 / 贴图 / 取消），支持**贴图悬浮窗**（拖动 / 滚轮缩放 / `Cmd+W`·`X`·`Esc` 关闭）。
 - **滚轮控制**：基于 `CGEventTap` 的全局滚轮拦截引擎，支持反向 + 平滑滚动 + 触控板豁免。
-- **右键增强**：Finder Sync 扩展注入右键菜单（新建文件 / 复制路径 / 用 App 打开 / 直接删除 / 隐藏显示 / 常用目录），瘦扩展模式：扩展只渲染菜单，操作在主进程执行。
+- **右键增强**：Finder Sync 扩展注入右键菜单（10 项动作），瘦扩展模式：扩展只渲染菜单、操作在主进程执行；配置经 **App Group 共享文件**下发（Finder 重启也稳定），并保留分布式通知实时刷新。免费路线：`Info.plist` NSServices「服务」子菜单同享全部动作（免签名）。
 - **全局快捷键**：基于 Carbon `RegisterEventHotKey`，零依赖、免辅助功能权限。支持区域截图 / 全屏截图 / 窗口截图 / 切换主窗口 / 打开概览，绑定可在「设置」中录制。
 - **功能开关**：只启用需要的功能，主界面才出现对应入口；未启用功能的 Service 绝不实例化，降低常驻内存。
 - **特权扩展点**：`PrivilegedOperations` 协议 + `UserSpacePrivilegedOperations` 普通权限实现，为未来特权 Helper（深层系统清理、受保护目录删除）预留干净接口。
@@ -74,9 +74,9 @@ MacToolBox/
 │   │   │   ├── AppLaunch/      AppLaunchMonitorService.swift + AppLaunchMonitorView.swift + AppLaunchRecord.swift
 │   │   │   ├── FolderMap/      FolderMapService.swift  + FolderMapView.swift
 │   │   │   ├── Brew/           BrewService.swift       + BrewView.swift
-│   │   │   ├── Cleanup/        DiskCleaner.swift(actor) + CleanupClassifier + CleanupService.swift + CleanupView.swift
+│   │   │   ├── Cleanup/        DiskCleaner.swift(actor, CleanupTarget 路径地图) + CleanupService.swift + CleanupView.swift
 │   │   │   ├── LaunchAgent/    LaunchAgentService.swift + LaunchAgentView.swift
-│   │   │   ├── Screenshot/     ScreenshotEngine.swift  + RegionSelector.swift + ScreenshotView.swift + PinnedImageManager.swift
+│   │   │   ├── Screenshot/     ScreenshotCore.swift + CaptureOverlay.swift + PinManager.swift + WindowDetector.swift + ScreenshotView.swift
 │   │   │   ├── ScrollControl/  ScrollControlService.swift + ScrollEvent.swift + ScrollPoster.swift + ScrollControlView.swift
 │   │   │   └── RightClick/     RightClickService.swift  + RightClickModels.swift + RightClickActionHandlers.swift + RightClickView.swift
 │   │   ├── Services/                     # 跨功能的共享服务
@@ -97,11 +97,13 @@ MacToolBox/
 │       └── RightClickShared.swift       # 消息类型 + RCMessager（DistributedNotificationCenter + SHA256 签名）
 └── Tests/                                # 沙盒测试层（每个功能一个测试，纯逻辑可单测）
     ├── TestMain.swift                     # @main 测试入口（同步 + 异步 actor 汇总）
-    ├── ScreenshotEngineTests.swift        # clampRegion / buildFilename / pngData
+    ├── ScreenshotTests.swift             # CaptureMode / ScreenshotMath（区域裁剪 / 文件名 / 纯函数）
     ├── HotkeyTests.swift                  # Hotkey Codable / displayString / from(cocoa:)
     ├── BrewServiceTests.swift            # parseByteSize 字节解析
     ├── LaunchAgentServiceTests.swift      # parsePlistFile plist 解析
-    └── DiskCleanerTests.swift            # 扫描 / 删除 / 白名单保护（actor async）
+    ├── RightClickTests.swift             # 配置开关 / 签名校验 / RCMenuConfig 映射
+    ├── ScrollEventTests.swift            # 滚轮事件解析 / 反向转换
+    └── DiskCleanerTests.swift            # 扫描 / 删除 / 白名单越权保护（actor async）
 ```
 
 ### 分层职责
@@ -190,14 +192,15 @@ MacToolBox/
 
 ### 垃圾清理
 
-- **分类规则引擎**：`DiskCleaner` 扫描白名单目录（`~/Library/Caches`、`~/Library/Logs`、`NSTemporaryDirectory()`）时，通过 `CleanupClassifier` 按路径识别每条垃圾的类别：
-  - **系统垃圾**：`Logs` / `tmp` / 系统临时目录（日志、临时文件）。
-  - **应用垃圾**：`Caches` 下非浏览器应用（如 QQ、微信、VSCode、网易云音乐）。
-  - **上网垃圾**：`Caches` 下浏览器（Safari、Chrome、Firefox、Edge、夸克、QQ浏览器 等）。
-- **按应用聚合 UI**：扫描结束后按「类别 × 应用」聚合为 `CleanupGroup`，界面先展示大类（系统/应用/上网），每类下再列出「应用行」，每个应用一个三态复选框，点一下即整组勾选/清理。可选项从「每个文件」收敛到「每个应用」（通常几十行），从根本上消除选择卡顿。
-- **默认安全选中**：扫描结束后仅自动勾选 `risk == .safe` 的项；谨慎项（如用户日志）默认不选，防止误删。选中总字节数由预构建的 `sizeByURL` 字典计算，复杂度从 O(N²) 降到 O(N)。
-- **分批清理**：`CleanupService.clean` 把选中项按 `chunkSize = 50` 分批次交给 `DiskCleaner.delete`，每批之间 `Task.yield()` 让出事件循环，避免一次性大量文件操作阻塞 UI。
-- **白名单保护**：任何不在 `allowedRoots` 前缀下的路径都不扫描、不删除，误点「全选」也不会越界。
+对标开源 [Clean-Me](https://github.com/Kevin-De-Koninck/Clean-Me)（Swift，1.8k★）重构：
+
+- **清理路径地图**：`DiskCleaner` 定义 `CleanupTarget` 覆盖多类位置——用户 / 系统缓存、用户 / 系统日志、临时目录、`Xcode DerivedData`、废纸篓等（原实现仅覆盖 3 处）。
+- **分类规则引擎**：按路径识别每条垃圾类别（系统垃圾 / 应用缓存 / 上网缓存 / 开发工具缓存等），并增强识别 Xcode 派生数据、iOS 模拟器、`npm` / `Homebrew` / `Go` / `Cargo` / `Clang` 等开发工具缓存。
+- **按来源聚合 UI**：扫描结束按「来源文件夹」聚合为 `SourceSection`，每来源下再按应用分组（`AppGroup`）；基础（用户级）/ 系统级分离，系统级标锁并提示「需管理员」。界面以来源卡片展示，可折叠 / 展开。
+- **安全模型（核心）**：沿用 Clean-Me「**只删内容不删根目录**」原则——删除时绝不触碰根目录本身（`isRoot` 保护），误点「全选」也不会删除系统目录。
+- **默认安全选中**：仅自动勾选 `risk == .safe` 且非系统级的项；系统级（需管理员）默认不选，避免选中后删不掉。
+- **分批清理**：`CleanupService.clean` 把选中项按 `chunkSize = 50` 分批次交给 `DiskCleaner.delete`，每批之间 `Task.yield()` 让出事件循环，避免阻塞 UI。
+- **白名单保护**：任何不在 `allowedRoots` 前缀下的路径都不扫描、不删除。
 
 ### 磁盘自动挂载
 
@@ -216,12 +219,26 @@ launchctl unsetenv METAL_HUD_ENABLED     # 关闭
 
 `NSWorkspace.didLaunchApplicationNotification` 接收启动事件；`ps eww -p <pid>` 读取参数。非 root 进程读取其他进程环境变量可能受限（macOS SIP）。
 
+### 启动项
+
+对标开源 [KnockKnock](https://github.com/objective-see/KnockKnock)（Objective-See，持久化枚举器）重构，枚举多个持久化位置而非单一目录：
+
+- **多位置枚举**：用户 LaunchAgents（`~/Library/LaunchAgents`）、系统 LaunchAgents（`/Library/LaunchAgents`）、系统 LaunchDaemons（`/Library/LaunchDaemons`）、`/System/Library` 只读 Agents/Daemons。
+- **类型与作用域**：每项带 `kind`（`agent` / `daemon`）与 `scope`（`user` / `system` / `systemReadOnly`），区分可管理性。
+- **用户级可管理**：备份后禁用 / 恢复（保留原安全机制，不直接物理删除）；Finder 中定位。
+- **系统级**：App 内不可改（需 root），提供一键复制 `launchctl` 命令（系统级自动加 `sudo`）；系统只读项仅展示并标锁。
+- 本 App 普通权限运行，系统级目录需 root 才能改，故系统级项以「查看 + 复制命令」为主，与 KnockKnock「发现为主」定位一致。
+
 ### 截图
 
-- 全屏 / 窗口：`/usr/sbin/screencapture -x`（`-w` 拾取窗口）。
-- 区域拖选：自定义 `NSPanel` + `NSView` 半透明遮罩，拖拽出选区（destinationOut 挖空），Esc 取消，回调 `CGRect` 后交给 `screencapture -R`。
-- 纯函数 `clampRegion` / `buildFilename` / `pngData` 可独立单测。
-- 保存位置可选「文件」或「剪贴板」。
+对标开源 [capcap](https://github.com/realskyrin/capcap)（纯 AppKit 零依赖）重构，三模式：
+
+- **全屏**：直接截取光标所在屏并保存到默认位置（或 `pin` 直接贴图）。
+- **区域拖选**：逐屏 `CGDisplayCreateImage` 合成快照，铺无边框 `OverlayWindow`（borderless + `.screenSaver` 级别）整屏暗化遮罩；`SelectionView` 拖拽选区，进入即整屏蒙版提示，悬停窗口挖洞高亮（窗口吸附）。
+- **窗口**：`CGWindowListCopyWindowInfo` 枚举窗口，`WindowDetector` 吸附，单击即捕。
+- **选区工具条**：选中后浮动工具条（保存 / 复制 / 贴图 / 取消），双击 / 回车 = 保存，Esc / 右键取消；`CaptureSession` 加 `isCapturing` 守卫防重复触发快捷键。
+- **贴图**：`PinManager` 把选区裁图贴为浮动窗，支持拖动（按绝对位置差，四向正确）、滚轮缩放、`Cmd+W` / `X` / `Esc` 关闭、多张叠加。
+- 纯函数 `ScreenshotMath.clamp` / `ScreenshotFlow.buildFilename` / `savePNG` 可独立单测。
 
 ### 全局快捷键
 
@@ -253,11 +270,13 @@ Carbon `RegisterEventHotKey` 在 `HotkeyService` 内注册；系统按键事件�
 
 | 测试 | 覆盖 |
 |------|------|
-| `ScreenshotEngineTests` | 区域裁剪 `clampRegion`、文件名 `buildFilename`、PNG 编码 `pngData` |
+| `ScreenshotTests` | `CaptureMode` / `ScreenshotMath`（区域裁剪 / 文件名 / 纯函数） |
 | `HotkeyTests` | `Hotkey` Codable 往返、显示串 `displayString`、`from(cocoa:)` 掩码转换 |
 | `BrewServiceTests` | 字节大小 `parseByteSize` 解析 |
 | `LaunchAgentServiceTests` | `parsePlistFile` plist 解析（启用/禁用项） |
-| `DiskCleanerTests` |（`actor` async）扫描 / 删除 / 白名单越权保护 / **分类规则** / **默认选择** / **分批清理** |
+| `RightClickTests` | 配置开关 / 签名校验 / `RCMenuConfig` 映射 |
+| `ScrollEventTests` | 滚轮事件解析 / 反向转换 |
+| `DiskCleanerTests` |（`actor` async）扫描 / 删除 / 白名单越权保护 / 路径地图 / **默认选择** / **分批清理** |
 
 测试不依赖真实 UI 或特权：纯函数直接断言；`DiskCleaner` 经 `init(allowedRoots:)` 注入沙盒目录，删除越权路径被安全拒绝。全部通过时输出 `✅ ALL TESTS PASSED`。
 
