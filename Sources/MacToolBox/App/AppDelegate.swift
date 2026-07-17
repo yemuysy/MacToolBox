@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 8. 注册系统服务（免费路线右键增强：零证书，出现在 Finder 右键「服务」子菜单）
         NSApp.servicesProvider = self
-        NSUpdateDynamicServices()
+        registerServices()
 
         Logger.shared.info("MacToolBox bootstrap complete, windows: \(NSApp.windows.count), app isActive: \(NSApp.isActive)")
     }
@@ -383,6 +383,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - 系统服务（免费路线右键增强，Finder 右键「服务」子菜单）
+
+    /// 注册 NSServices：lsregister 强制注册 + NSUpdateDynamicServices 刷新 pbs。
+    /// ad-hoc 签名 App 的 NSServices 默认不被 pbs 索引，必须用 lsregister -f 强制注册到
+    /// LaunchServices，再用 pbs -update 刷新服务缓存。否则 Finder 右键「服务」里看不到。
+    private func registerServices() {
+        // 1. lsregister -f 强制注册 App 到 LaunchServices（关键步骤）
+        let lsregister = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Support/lsregister"
+        let appURL = Bundle.main.bundlePath
+        let task = Process()
+        task.launchPath = lsregister
+        task.arguments = ["-f", appURL]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            rcLog("Services: lsregister exit=\(task.terminationStatus)")
+        } catch {
+            rcLog("Services: lsregister failed: \(error.localizedDescription)")
+        }
+
+        // 2. 立即 + 延迟两次刷 pbs（DO 端口就绪 + Finder 冷启动覆盖）
+        NSUpdateDynamicServices()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard self != nil else { return }
+            NSUpdateDynamicServices()
+            rcLog("Services: delayed re-registration complete")
+        }
+    }
 
     /// NSServices 入口：由 Info.plist 的 `NSServices` 声明触发，`userData` 区分动作。
     /// 零证书，复用 `RightClickActionHandlers`。
