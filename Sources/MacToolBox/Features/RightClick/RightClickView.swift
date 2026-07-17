@@ -48,12 +48,13 @@ struct RightClickView: View {
 
     private var statusText: String {
         if !config.enabled { return "已关闭" }
-        return service.extensionAlive ? "已接入" : "待启用扩展"
+        // ad-hoc 签名下扩展不会注册，extensionAlive 永远 false，改用中性文案
+        return "仅 NSServices 路线"
     }
 
     private var statusColor: Color {
         if !config.enabled { return .secondary }
-        return service.extensionAlive ? .green : .orange
+        return .blue   // 中性蓝,表示「可用但需要走 NSServices」
     }
 
     // MARK: - 启用引导
@@ -61,8 +62,8 @@ struct RightClickView: View {
     private var guideCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(title: "启用 Finder 扩展（一级菜单）", icon: "puzzlepiece.extension")
-                Text("右键一级菜单由独立的 Finder Sync 扩展提供，需手动启用一次：\n1. 将 MacToolBox 放到 /Applications；\n2. 打开「系统设置 → 扩展 → Finder」，开启 MacToolBox；\n3. 在本页打开上方开关。\n\n免签名替代：不启用扩展也能用——Finder 右键「服务」子菜单里的「MacToolBox：xxx」即本功能（免费路线）。")
+                SectionHeader(title: "Finder 右键集成说明", icon: "puzzlepiece.extension")
+                Text("当前 ad-hoc 签名版本的 Finder Sync 扩展**不会被系统注册**——打开「系统设置 → 扩展 → Finder」看不到 MacToolBox，所以本版本只能走「服务」子菜单路线：Finder 右键任意文件 → 服务 → 「MacToolBox：xxx」。\n\n要让 Finder 一级菜单直接出现，需用 Apple Developer ID Application 证书重新签名（¥688/年），详见 build.sh 顶部 SIGN_IDENTITY 说明。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -73,6 +74,7 @@ struct RightClickView: View {
                         Label("打开系统设置", systemImage: "gearshape")
                     }
                     .controlSize(.small)
+                    .help("即便看不到 MacToolBox 也建议打开看看，验证一下当前签名下确实没注册")
                     Button {
                         revealInFinder()
                     } label: {
@@ -292,7 +294,7 @@ struct RightClickView: View {
         Card {
             VStack(alignment: .leading, spacing: 6) {
                 SectionHeader(title: "说明", icon: "info.circle")
-                Text("• Finder Sync 扩展需手动在「系统设置 → 扩展 → Finder」开启一次；配置经 App Group 共享文件下发，Finder 重启也稳定。\n• 不启用扩展也能用：Finder 右键「服务」子菜单里的「MacToolBox：xxx」即本功能（免签名）。\n• 扩展仅渲染菜单并转发点击，所有文件操作在主程序执行。\n• 直接删除为危险操作，已加系统路径守卫与确认弹窗。")
+                Text("• 当前 ad-hoc 签名版本的 Finder Sync 扩展不会被系统注册，「系统设置 → 扩展 → Finder」里看不到 MacToolBox。\n• 本版本只能通过 Finder 右键 → 服务 → 「MacToolBox：xxx」使用（功能完整，配置在主程序）。\n• 想让 Finder 一级菜单直接出现，需要 Apple Developer ID Application 证书（¥688/年）重新签名 FinderSyncExt。\n• 直接删除为危险操作，已加系统路径守卫与确认弹窗。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
