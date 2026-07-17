@@ -76,7 +76,7 @@ final class FinderSyncExt: FIFinderSync, @unchecked Sendable {
 
     override func menu(for menuKind: FIMenuKind) -> NSMenu? {
         // 优先用缓存，缓存为空时再尝试从 App Group 文件读取（Finder 重启兜底）
-        var config = cachedMenuConfig ?? RCAppGroup.loadMenuConfig()
+        let config = cachedMenuConfig ?? RCAppGroup.loadMenuConfig()
         guard let cfg = config, cfg.enabled else { return nil }
 
         let contextualKinds: [FIMenuKind] = [

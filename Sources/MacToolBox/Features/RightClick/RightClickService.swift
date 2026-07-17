@@ -154,7 +154,7 @@ final class RightClickService: ObservableObject {
     func scanDefaultTerminal() {
         let ids = ["com.googlecode.iterm2", "com.apple.Terminal", "com.todesktop.230313mzl4w4u92"]
         for id in ids {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            if NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) != nil {
                 config.terminalBundleID = id
                 persist(); publishMenuConfig()
                 return
