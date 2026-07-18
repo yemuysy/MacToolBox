@@ -15,6 +15,7 @@ enum FeatureID: String, CaseIterable, Identifiable, Codable, Sendable {
     case screenshot
     case scrollControl
     case rightClick
+    case hosts
 
     var id: String { rawValue }
 }

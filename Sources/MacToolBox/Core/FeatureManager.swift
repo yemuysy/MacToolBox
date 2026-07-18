@@ -139,9 +139,14 @@ final class FeatureManager: ObservableObject {
             ) { AnyView(ScrollControlView().onAppear { ScrollControlService.shared.refreshPermission() }) },
 
             FeatureDefinition(
-                id: .rightClick, title: "右键增强", icon: "rectangle.on.folder",
+                id: .rightClick, title: "右键增强", icon: "hand.tap",
                 isCore: false, defaultEnabled: false
             ) { AnyView(RightClickView().onAppear { RightClickService.shared.publishMenuConfig() }) },
+
+            FeatureDefinition(
+                id: .hosts, title: "Hosts", icon: "globe",
+                isCore: false, defaultEnabled: true
+            ) { AnyView(HostsView().onAppear { HostsService.shared.start() }) },
         ]
     }
 }

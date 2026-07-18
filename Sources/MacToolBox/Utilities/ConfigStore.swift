@@ -16,6 +16,8 @@ final class ConfigStore: @unchecked Sendable {
     private var scrollControlStorage: ScrollControlConfig = ScrollControlConfig()
     // 右键增强配置
     private var rightClickStorage: RightClickConfig = RightClickConfig()
+    // hosts 方案（SwitchHosts 类功能）
+    private var hostSchemesStorage: [HostScheme] = []
 
     // 功能开关 + 快捷键（独立文件 features.json，避免破坏旧 config.json 结构）
     private var featureEnabledStorage: Set<String> = []
@@ -123,6 +125,19 @@ final class ConfigStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - hosts 方案（SwitchHosts 类功能）
+
+    func hostSchemes() -> [HostScheme] {
+        queue.sync { hostSchemesStorage }
+    }
+
+    func setHostSchemes(_ schemes: [HostScheme]) {
+        queue.sync(flags: .barrier) {
+            hostSchemesStorage = schemes
+            save()
+        }
+    }
+
     // MARK: - 软链接映射（独立功能）
 
     /// 记录一条软链接：链接路径 -> 目标路径
@@ -157,6 +172,7 @@ final class ConfigStore: @unchecked Sendable {
         // 可选：旧版 config.json 无此字段时解码为 nil，避免整体解码失败丢失其它配置
         var scrollControl: ScrollControlConfig?
         var rightClick: RightClickConfig?
+        var hosts: [HostScheme]?
     }
 
     private func load() {
@@ -170,6 +186,7 @@ final class ConfigStore: @unchecked Sendable {
         menuBarStorage = parsed.menuBar
         if let sc = parsed.scrollControl { scrollControlStorage = sc }
         if let rc = parsed.rightClick { rightClickStorage = rc }
+        if let h = parsed.hosts { hostSchemesStorage = h }
     }
 
     private func save() {
@@ -178,7 +195,8 @@ final class ConfigStore: @unchecked Sendable {
             symLinks: symLinkStorage,
             menuBar: menuBarStorage,
             scrollControl: scrollControlStorage,
-            rightClick: rightClickStorage
+            rightClick: rightClickStorage,
+            hosts: hostSchemesStorage
         )
         guard let data = try? JSONEncoder().encode(payload) else { return }
         try? data.write(to: fileURL, options: .atomic)
