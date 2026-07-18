@@ -19,7 +19,7 @@ struct MenuBarRootView: View {
             minWidth: 760, idealWidth: 920, maxWidth: .infinity,
             minHeight: 560, idealHeight: 660, maxHeight: .infinity
         )
-        .background(VisualEffectView(material: .windowBackground, blendingMode: .behindWindow))
+        .background(VisualEffectView(material: .windowBackground))
         .onReceive(features.$enabledIDs) { _ in
             // 当前功能被关闭时回退到着陆功能
             if !features.isEnabled(features.selectedFeature) { features.selectedFeature = features.landing }
@@ -141,6 +141,7 @@ struct MenuBarRootView: View {
         case .cleanup: return "磁盘清理与空间管理"
         case .launchAgent: return "登录项管理"
         case .screenshot: return "截图与录屏"
+        case .hosts: return "hosts 方案管理与一键切换"
         }
     }
 
@@ -172,35 +173,34 @@ private struct SidebarButton: View {
     var isSelected: Bool { selected == def.id }
 
     var body: some View {
-        Button {
+        HStack(spacing: 10) {
+            Image(systemName: def.icon)
+                .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
+                .frame(width: 20)
+            Text(def.title)
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+            Spacer()
+        }
+        .foregroundStyle(isSelected ? .white : .primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Group {
+                if isSelected {
+                    Theme.accentGradient
+                } else {
+                    Color.primary.opacity(hovered ? 0.06 : 0)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                 selected = def.id
             }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: def.icon)
-                    .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
-                    .frame(width: 20)
-                Text(def.title)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                Spacer()
-            }
-            .foregroundStyle(isSelected ? .white : .primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .contentShape(Rectangle())
-            .background(
-                Group {
-                    if isSelected {
-                        Theme.accentGradient
-                    } else {
-                        Color.primary.opacity(hovered ? 0.06 : 0)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
-            )
         }
-        .buttonStyle(.plain)
         .onHover { hovered = $0 }
     }
 }

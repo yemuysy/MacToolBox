@@ -100,11 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 920, height: 660))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.minSize = NSSize(width: 760, height: 560)
-        // 毛玻璃材质：窗口非不透明 + 透明背景 + 透明标题栏，
-        // 让根背景的 VisualEffectView(.behindWindow) 能透出桌面壁纸。
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.titlebarAppearsTransparent = true
+        // 窗口不透明：标题栏 + 内容区均为实色，杜绝透明穿透。
+        // 内容区磨砂效果由 VisualEffectView(.windowBackground)「窗口内磨砂」提供（非穿透桌面）。
+        window.isOpaque = true
+        window.backgroundColor = NSColor.windowBackgroundColor
+        window.titlebarAppearsTransparent = false
         window.hasShadow = true
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.fullScreenAuxiliary)

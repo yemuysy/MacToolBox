@@ -212,7 +212,8 @@ final class HotkeyRecorder: ObservableObject {
         recordingAction = action
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             Task { @MainActor in
-                self?.handle(event, action: action)
+                guard let act = self?.recordingAction else { return }
+                self?.handle(event, action: act)
             }
             return nil
         }
