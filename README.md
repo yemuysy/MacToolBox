@@ -20,13 +20,14 @@
 | `brew` | Homebrew | `mug` | 开 | 已装/可清理/过期包查询 |
 | `cleanup` | 垃圾清理 | `trash.fill` | 关 | 按 **系统 / 应用 / 上网** 垃圾分组，默认仅选安全项，分批清理（`actor` 隔离） |
 | `launchAgent` | 启动项 | `power` | 关 | LaunchAgent/Daemon plist 解析与管理 |
-| `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件 / 剪贴板，或**贴图**悬浮窗（拖动 / 缩放 / 关闭） |
+| `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件 / 剪贴板，或**贴图**悬浮窗（拖动 / 缩放 / 关闭）；选区后工具条直接集成**就地标注**（矩形 / 圆形 / 箭头 / 画笔 / 文字 / 马赛克） |
 | `scrollControl` | 滚轮控制 | `computermouse` | 关 | 鼠标滚轮反向 + 平滑滚动，触控板豁免 |
-| `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单（10 项）：新建文件 / 从模板新建 / 复制路径 / 复制文件名 / 用 App 打开 / 在终端打开 / 在 Finder 显示 / 直接删除 / 隐藏显示 / 常用目录。**免费路线：macOS Quick Action (.workflow)** + `mactoolbox://` URL 协议，零证书稳定出现在 Finder 右键「服务」子菜单 |
+| `rightClick` | 右键增强 | `hand.tap` | 关 | Finder 右键菜单（10 项）：新建文件 / 从模板新建 / 复制路径 / 复制文件名 / 用 App 打开 / 在终端打开 / 在 Finder 显示 / 直接删除 / 隐藏显示 / 常用目录。**免费路线：macOS Quick Action (.workflow)** + `mactoolbox://` URL 协议，零证书稳定出现在 Finder 右键「服务」子菜单 |
+| `hosts` | Hosts | `globe` | 开 | SwitchHosts 类 hosts 管理：多方案增删改、一键切换 / 刷新系统 DNS、系统 hosts 实时预览，列表整行可点 |
 
 核心能力：
 
-- **截图**：基于 `CGDisplayCreateImage` 逐屏合成 + 无边框叠层遮罩，区域拖选 / 窗口吸附 / 全屏三模式；选区后浮动工具条（保存 / 复制 / 贴图 / 取消），支持**贴图悬浮窗**（拖动 / 滚轮缩放 / `Cmd+W`·`X`·`Esc` 关闭）。
+- **截图**：基于 `CGDisplayCreateImage` 逐屏合成 + 无边框叠层遮罩，区域拖选 / 窗口吸附 / 全屏三模式；选区后**工具条直接集成标注工具，就地绘制**（矩形 / 圆形 / 箭头 / 画笔 / 文字 / 马赛克 + 6 色 + 撤销），再保存 / 复制 / 贴图，无需弹窗；支持**贴图悬浮窗**（拖动 / 滚轮缩放 / `Cmd+W`·`X`·`Esc` 关闭）。
 - **滚轮控制**：基于 `CGEventTap` 的全局滚轮拦截引擎，支持反向 + 平滑滚动 + 触控板豁免。
 - **右键增强**：Finder Sync 扩展注入右键菜单（10 项动作），瘦扩展模式：扩展只渲染菜单、操作在主进程执行；配置经 **App Group 共享文件**下发（Finder 重启也稳定），并保留分布式通知实时刷新。免费路线：`Info.plist` NSServices「服务」子菜单同享全部动作（免签名）。
 - **全局快捷键**：基于 Carbon `RegisterEventHotKey`，零依赖、免辅助功能权限。支持区域截图 / 全屏截图 / 窗口截图 / 切换主窗口 / 打开概览，绑定可在「设置」中录制。
@@ -79,7 +80,9 @@ MacToolBox/
 │   │   │   ├── Cleanup/        DiskCleaner.swift(actor, CleanupTarget 路径地图) + CleanupService.swift + CleanupView.swift
 │   │   │   ├── LaunchAgent/    LaunchAgentService.swift + LaunchAgentView.swift
 │   │   │   ├── Screenshot/     ScreenshotCore.swift + CaptureOverlay.swift + PinManager.swift + WindowDetector.swift + ScreenshotView.swift
+│   │   │   │   └── Annotation/ AnnotationCanvas.swift + AnnotationModels.swift + AnnotationToolbar.swift + AnnotationEditor.swift（就地标注）
 │   │   │   ├── ScrollControl/  ScrollControlService.swift + ScrollEvent.swift + ScrollPoster.swift + ScrollControlView.swift
+│   │   │   ├── Hosts/          HostsModels.swift + HostsService.swift + HostsView.swift + HostsTextView.swift（SwitchHosts 类）
 │   │   │   └── RightClick/     RightClickService.swift  + RightClickModels.swift + RightClickActionHandlers.swift + RightClickView.swift
 │   │   ├── Services/                     # 跨功能的共享服务
 │   │   │   └── SystemInfoService.swift   # mach + sysctl + ioreg + SMC 温度（@Published 快照：平均 + 最热核心，后台读取）
@@ -261,8 +264,8 @@ launchctl unsetenv METAL_HUD_ENABLED     # 关闭
 - **全屏**：直接截取光标所在屏并保存到默认位置（或 `pin` 直接贴图）。
 - **区域拖选**：逐屏 `CGDisplayCreateImage` 合成快照，铺无边框 `OverlayWindow`（borderless + `.screenSaver` 级别）整屏暗化遮罩；`SelectionView` 拖拽选区，进入即整屏蒙版提示，悬停窗口挖洞高亮（窗口吸附）。
 - **窗口**：`CGWindowListCopyWindowInfo` 枚举窗口，`WindowDetector` 吸附，单击即捕。
-- **选区工具条**：选中后浮动工具条（保存 / 复制 / 贴图 / 取消），双击 / 回车 = 保存，Esc / 右键取消；`CaptureSession` 加 `isCapturing` 守卫防重复触发快捷键。
-- **贴图**：`PinManager` 把选区裁图贴为浮动窗，支持拖动（按绝对位置差，四向正确）、滚轮缩放、`Cmd+W` / `X` / `Esc` 关闭、多张叠加。
+- **选区工具条**：选中后浮动工具条直接集成标注工具（矩形 / 圆形 / 箭头 / 画笔 / 文字 / 马赛克）+ 6 色 + 撤销，在选区上**就地绘制**；右侧操作按钮：保存 / 复制 / 贴图 / 取消。双击 / 回车 = 保存，`Cmd+Z` = 撤销标注，Esc / 右键取消；`CaptureSession` 加 `isCapturing` 守卫防重复触发快捷键。
+- **贴图**：`PinManager` 把选区裁图贴为浮动窗，按**屏幕原始比例**展示（Retina 下按 `backingScaleFactor` 换算逻辑点，不再 2× 放大），支持拖动（按绝对位置差，四向正确）、滚轮缩放、`Cmd+W` / `X` / `Esc` 关闭、多张叠加。
 - 纯函数 `ScreenshotMath.clamp` / `ScreenshotFlow.buildFilename` / `savePNG` 可独立单测。
 
 ### 全局快捷键
