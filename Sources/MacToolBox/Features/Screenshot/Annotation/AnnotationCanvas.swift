@@ -263,8 +263,15 @@ final class AnnotationCanvas: NSView {
         field.textColor = currentColor
         field.delegate = self
         addSubview(field)
-        window?.makeFirstResponder(field)
-        field.selectText(nil)
+        // 延迟到下一个 run loop 设焦点：mouseDown 事件处理中调 makeFirstResponder
+        // 会被 AppKit 在事件结束后回退（尤其 mouseDown 是经 SelectionView 程序化转发来的）
+        DispatchQueue.main.async { [weak self] in
+            guard let win = self?.window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            win.makeKeyAndOrderFront(nil)
+            win.makeFirstResponder(field)
+            field.selectText(nil)
+        }
     }
 
     // MARK: - 键盘
