@@ -33,6 +33,9 @@ enum ShellExecutor {
         task.waitUntilExit()
         stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        // 显式关闭文件句柄，避免进程退出后句柄残留
+        stdoutPipe.fileHandleForReading.closeFile()
+        stderrPipe.fileHandleForReading.closeFile()
 
         let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

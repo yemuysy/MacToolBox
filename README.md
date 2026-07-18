@@ -1,6 +1,8 @@
 # MacToolBox
 
-一款面向 Apple Silicon 的 macOS 系统工具箱，双形态运行：常驻菜单栏 + 独立主窗口。纯 SwiftUI + Swift 实现，**零第三方依赖**，且全程 **Swift 6 严格并发**（`-swift-version 6`）。
+一款面向 Apple Silicon 的 macOS 系统工具箱，双形态运行：常驻菜单栏 + 独立主窗口。纯 SwiftUI + Swift 实现，**零第三方依赖**，全程 **Swift 严格并发**（`@MainActor` / `actor` / `Sendable` 约束）。
+
+**视觉语言**：毛玻璃材质（NSVisualEffectView）+ 渐变强调色（蓝→青 #1E6FE0 → #17C3B2）+ 三段式菜单栏面板（渐变状态横幅 / 数据药丸 / 趋势画布）。
 
 ![主窗口](screenshots/main_window_ui.png)
 
@@ -20,7 +22,7 @@
 | `launchAgent` | 启动项 | `power` | 关 | LaunchAgent/Daemon plist 解析与管理 |
 | `screenshot` | 截图 | `camera.viewfinder` | 开 | 全屏 / 窗口 / **区域拖选** 截图，存文件 / 剪贴板，或**贴图**悬浮窗（拖动 / 缩放 / 关闭） |
 | `scrollControl` | 滚轮控制 | `computermouse` | 关 | 鼠标滚轮反向 + 平滑滚动，触控板豁免 |
-| `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单（10 项）：新建文件 / 从模板新建 / 复制路径 / 复制文件名 / 用 App 打开 / 在终端打开 / 在 Finder 显示 / 直接删除 / 隐藏显示 / 常用目录 |
+| `rightClick` | 右键增强 | `rectangle.on.folder` | 关 | Finder 右键菜单（10 项）：新建文件 / 从模板新建 / 复制路径 / 复制文件名 / 用 App 打开 / 在终端打开 / 在 Finder 显示 / 直接删除 / 隐藏显示 / 常用目录。**免费路线：macOS Quick Action (.workflow)** + `mactoolbox://` URL 协议，零证书稳定出现在 Finder 右键「服务」子菜单 |
 
 核心能力：
 
@@ -87,8 +89,9 @@ MacToolBox/
 │   │   └── Utilities/                   # 基础设施
 │   │       ├── ConfigStore.swift         # JSON 持久化（config.json + 独立 features.json）
 │   │       ├── Logger.swift              # OSLog
-│   │       ├── ShellExecutor.swift       # Process 封装
-│   │       └── SMCReader.swift           # Apple Silicon SMC 温度读取（移植自 Stats）
+│   │       ├── ShellExecutor.swift       # Process 封装（Pipe 显式关闭）
+│   │       ├── SMCReader.swift           # Apple Silicon SMC 温度读取（移植自 Stats）
+│   │       └── IconCache.swift           # 图标缓存（AppIcon/MenuBarIcon 一次加载）
 │   ├── FinderSyncExt/                   # Finder Sync 扩展（右键增强的独立进程）
 │   │   ├── FinderSyncExt.swift          # FIFinderSync 子类：菜单渲染 + 点击转发
 │   │   ├── Info.plist                   # NSExtension 声明
@@ -123,6 +126,24 @@ MacToolBox/
 3. 启动时对非核心功能做 `resolveEnabled`：若 `features.json` 已配置则按其存储；否则按 `defaultEnabled`。
 4. **侧边栏、菜单栏面板、快捷键**全部由 `FeatureManager.enabledDefinitions` 驱动 —— 未启用功能既不在 UI 出现，其 `makeContent()` 也绝不被调用，故对应 Service 不会被实例化。
 5. 用户在「设置 → 功能开关」切换后，`setEnabled` 立即持久化到 `features.json`；核心功能（概览）不可关闭。
+
+### UI 设计语言
+
+macOS 原生质感 + 蓝青渐变品牌色：
+
+| 层级 | 组件 | 实现方式 |
+|------|------|----------|
+| **窗口材质** | 主窗口背景 | `VisualEffectView(.windowBackground, .behindWindow)` 透出桌面磨砂玻璃 |
+| **侧栏** | 导航栏 | `VisualEffectView(.sidebar)` 层叠质感 |
+| **气泡** | 菜单栏面板 | `VisualEffectView(.popover)` + 三段式布局 |
+| **状态横幅** | 气泡顶部 | 渐变底（正常蓝→青/负载橙→红）+ 白字图标光晕 |
+| **数据药丸** | 气泡指标卡 | 左 3px 色条 + 圆形图标底色圈 + 大号数字 |
+| **趋势画布** | 气泡图表区 | 微渐变底 + 图标标题行 + 右侧实时值 |
+| **卡片** | 主窗口内容 | 圆角 14 + 顶部高光 + 柔和外阴影 |
+| **页头** | 每个功能页顶栏 | 渐变图标徽章 + 粗体标题(19pt) + 副标题 |
+| **过渡** | Tab 切换 | `.transition(.opacity)` 0.22s 淡入 |
+| **数字** | 所有指标值 | `.contentTransition(.numericText())` 平滑跳变 |
+| **悬停** | 按钮/药丸 | `.onHover` 微提亮反馈 |
 
 ### 全局快捷键
 
@@ -180,7 +201,11 @@ MacToolBox/
 - **主线程阻塞消除**：应用启动监控的 `ps` 取参、Metal HUD 的 `setsid` 启动拉起、文件夹映射 `init` 的磁盘 I/O 全部移到后台队列，主线程零等待。
 - **子进程开销削减**：磁盘列表改为一次 `diskutil list -plist` 枚举所有卷后再逐个取详情（跳过物理盘 / 容器 / 系统卷）；Homebrew 动作后的局部刷新跳过耗时的 `brew cleanup -n --prune=all` 干跑，复用上次估算值。
 - **重复分配与重渲染消除**：`Sparkline` 每帧只计算一次几何点（面积与折线共用）；截图缩略图在创建时解码一次并缓存，不再每次渲染从磁盘重新解码；`ByteCountFormatter` / `DateFormatter` 统一为静态共享实例；快捷键变更只重渲染快捷键卡片而非整页。
-- **温度读取降频**：SMC 内核调用 5s 一次（EMA 平滑），主轮询 2s 处理 CPU/内存/网络/磁盘。
+- **温度读取降频**：SMC 内核调用 5s 一次（EMA 平滑），主轮询 2s 处理 CPU/内存/网络；**磁盘枚举降频至 20s**（其余轮询复用缓存）。
+- **图标缓存**：AppIcon / MenuBarIcon 通过 `IconCache` 一次加载，避免 SwiftUI 每帧 `NSImage(contentsOfFile:)` 重复读盘。
+- **reveal 跳转零重建**：侧栏选中状态由 `FeatureManager.selectedFeature`（共享 Binding）驱动，从菜单栏面板跳转特定功能页时仅设值+显示窗口，不再重建整棵视图树（修复了「跳转总落到概览」的 bug + 消除内存抖动）。
+- **启动非阻塞**：NSServices 注册的 `lsregister` 进程调用移到后台队列；主线程启动零阻塞。
+- **Pipe 资源释放**：ShellExecutor 显式关闭 stdout/stderr Pipe 文件句柄。
 
 参考对比：Chrome 单标签页 100-200MB，VSCode 1GB+。
 
@@ -290,11 +315,12 @@ Carbon `RegisterEventHotKey` 在 `HotkeyService` 内注册；系统按键事件�
 
 ## 后续计划
 
-- Apple Developer 签名 + Notarize
+- Apple Developer 签名 + Notarize（解决右键扩展/Quick Action 签名限制）
 - Sparkle 自动更新
 - 特权 Helper 骨架（SMJobBless / LaunchDaemon + XPC），接入 `PrivilegedOperations`
 - 清理筛选规则增强（按类型/年龄/体积）
-- 网络测速 / 屏幕保持唤醒
+- 深色模式微调（强调色在暗壁纸上适配）
+- 菜单栏图标随 CPU/温度变色（小生命感）
 
 ## License
 

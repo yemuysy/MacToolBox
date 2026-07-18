@@ -29,8 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 2. 启动必需后台 service（菜单栏标题依赖）
         SystemInfoService.shared.start()
 
-        // 3. 显示主窗口
-        showMainWindow()
+        // 3. 显示主窗口（启动自检展示：仅正常层级显示，不抢焦点、不强制置顶）
+        revealMainWindow(feature: .overview, activate: false)
 
         // 4. 构建偏好设置窗口（隐藏，待打开）
         setupPreferencesWindow()
@@ -93,12 +93,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 主窗口
 
     private func setupMainWindow(initialFeature: FeatureID = .overview) {
-        let host = NSHostingController(rootView: MenuBarRootView().selecting(initialFeature))
+        FeatureManager.shared.selectedFeature = initialFeature
+        let host = NSHostingController(rootView: MenuBarRootView())
         let window = NSWindow(contentViewController: host)
         window.title = "MacToolBox"
         window.setContentSize(NSSize(width: 920, height: 660))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.minSize = NSSize(width: 760, height: 560)
+        // 毛玻璃材质：窗口非不透明 + 透明背景 + 透明标题栏，
+        // 让根背景的 VisualEffectView(.behindWindow) 能透出桌面壁纸。
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.titlebarAppearsTransparent = true
+        window.hasShadow = true
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.fullScreenAuxiliary)
         window.center()
@@ -180,27 +187,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.orderFrontStandardAboutPanel(nil)
     }
 
-    /// 显示主窗口（可选直接跳转到指定功能）
+    /// 显示主窗口（可选直接跳转到指定功能）。用户主动唤起：拉到最前并抢焦点。
     func showMainWindow(reveal feature: FeatureID = .overview) {
+        revealMainWindow(feature: feature, activate: true)
+    }
+
+    /// 展示主窗口的统一入口。
+    /// - activate=true：用户主动唤起（点菜单栏/右键/跳转），`orderFrontRegardless` + 全局激活拉到最前。
+    /// - activate=false：启动自检展示，仅 `orderFront` 正常层级显示，**不抢焦点、不强制置顶**。
+    ///   修复：启动即用 `orderFrontRegardless` + `activate(ignoringOtherApps:)` 会让窗口强制置顶、
+    ///   抢走当前 App 焦点，需再点一次才回归正常层级。
+    private func revealMainWindow(feature: FeatureID, activate: Bool) {
         // 未启用且非核心功能：回退到着陆功能（核心功能 isEnabled 恒为 true）
         let target: FeatureID = FeatureManager.shared.isEnabled(feature) ? feature : .overview
+        // 通过共享的 selectedFeature（Binding）驱动侧栏切换，无需重建根视图树
+        FeatureManager.shared.selectedFeature = target
 
         guard let window = mainWindow else { return }
-        // 切换侧边栏到指定功能：通过重建 contentViewController 的根视图实现
-        if let host = window.contentViewController as? NSHostingController<MenuBarRootView> {
-            host.rootView = host.rootView.selecting(target)
-        } else {
-            setupMainWindow(initialFeature: target)
-        }
         NSApp.setActivationPolicy(.regular)
 
         if !window.isVisible {
             window.center()
         }
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
-        Logger.shared.info("showMainWindow(reveal:\(target.rawValue)): isVisible=\(window.isVisible)")
+        if activate {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            // 启动自检：强制在主屏居中，避免落到非主屏/离屏
+            if let screen = NSScreen.main {
+                let v = screen.visibleFrame
+                let x = v.midX - window.frame.width / 2
+                let y = v.midY - window.frame.height / 2
+                window.setFrameOrigin(NSPoint(x: x, y: y))
+            }
+            window.orderFront(nil)
+        }
+        Logger.shared.info("revealMainWindow(reveal:\(target.rawValue), activate=\(activate)): isVisible=\(window.isVisible)")
     }
 
     /// 供菜单栏面板 / 快捷操作调用：跳转主窗口指定功能
@@ -228,9 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            // 加载自定义模板图标
-            if let bundlePath = Bundle.main.path(forResource: "MenuBarIcon", ofType: "png"),
-               let image = NSImage(contentsOfFile: bundlePath) {
+            // 加载自定义彩色图标（缓存一次，避免重复读盘）
+            if let image = IconCache.menuBarIcon {
                 image.isTemplate = false
                 image.size = NSSize(width: 18, height: 18)
                 button.image = image
@@ -306,9 +328,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let text = parts.joined(separator: " ")
+        // 负载高时菜单栏文字暖色提示（小生命感，不抢戏）
+        let warm = snap.cpuUsage > 75 || snap.memoryUsage > 75 || (snap.temperature ?? 0) > 75
+        let hot = snap.cpuUsage > 90 || snap.memoryUsage > 90 || (snap.temperature ?? 0) > 90
+        let tint: NSColor = hot ? .systemRed : (warm ? .systemOrange : .labelColor)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.labelColor
+            .foregroundColor: tint
         ]
         button.attributedTitle = NSAttributedString(string: text, attributes: attrs)
     }
@@ -316,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupPopover() {
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 320, height: 420)
+        popover.contentSize = NSSize(width: 340, height: 470)
         popover.animates = true
         // 菜单栏面板：只显示核心指标，剔除完整功能页
         let host = NSHostingController(rootView: MenuBarPanelView())
@@ -339,10 +365,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // 左键：切换功能面板（含全部功能，无底部栏）
+        // 注：不调 NSApp.activate —— 只弹气泡、不抢全局焦点，
+        // 避免主窗口被意外拉到最前（置顶）和 popover 位置跳动。
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         }
     }
@@ -406,26 +433,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ad-hoc 签名 App 的 NSServices 默认不被 pbs 索引，必须用 lsregister -f 强制注册到
     /// LaunchServices，再用 pbs -update 刷新服务缓存。否则 Finder 右键「服务」里看不到。
     private func registerServices() {
-        // 1. lsregister -f 强制注册 App 到 LaunchServices（关键步骤）
-        let lsregister = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Support/lsregister"
         let appURL = Bundle.main.bundlePath
-        let task = Process()
-        task.launchPath = lsregister
-        task.arguments = ["-f", appURL]
-        do {
-            try task.run()
-            task.waitUntilExit()
-            rcLog("Services: lsregister exit=\(task.terminationStatus)")
-        } catch {
-            rcLog("Services: lsregister failed: \(error.localizedDescription)")
-        }
-
-        // 2. 立即 + 延迟两次刷 pbs（DO 端口就绪 + Finder 冷启动覆盖）
-        NSUpdateDynamicServices()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            guard self != nil else { return }
-            NSUpdateDynamicServices()
-            rcLog("Services: delayed re-registration complete")
+        // lsregister 是同步进程调用，放到后台队列，避免阻塞启动期主线程
+        DispatchQueue.global(qos: .utility).async {
+            let lsregister = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Support/lsregister"
+            let task = Process()
+            task.launchPath = lsregister
+            task.arguments = ["-f", appURL]
+            do {
+                try task.run()
+                task.waitUntilExit()
+                rcLog("Services: lsregister exit=\(task.terminationStatus)")
+            } catch {
+                rcLog("Services: lsregister failed: \(error.localizedDescription)")
+            }
+            // NSUpdateDynamicServices 必须在主线程调用
+            DispatchQueue.main.async {
+                // 立即 + 延迟两次刷 pbs（DO 端口就绪 + Finder 冷启动覆盖）
+                NSUpdateDynamicServices()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    guard self != nil else { return }
+                    NSUpdateDynamicServices()
+                    rcLog("Services: delayed re-registration complete")
+                }
+            }
         }
     }
 

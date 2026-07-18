@@ -5,7 +5,9 @@ import SwiftUI
 /// - 内容区按 FeatureID 切换，未启用功能显示占位提示。
 struct MenuBarRootView: View {
     @StateObject private var features = FeatureManager.shared
-    @State private var selected: FeatureID = FeatureManager.shared.landing
+    /// 当前选中的侧栏功能：直接绑定到 FeatureManager.selectedFeature（共享单一真相来源），
+    /// 避免 reveal 时重建整棵视图树（也修复了「跳转特定功能总落到概览」的 bug）。
+    private var selection: Binding<FeatureID> { $features.selectedFeature }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -17,10 +19,10 @@ struct MenuBarRootView: View {
             minWidth: 760, idealWidth: 920, maxWidth: .infinity,
             minHeight: 560, idealHeight: 660, maxHeight: .infinity
         )
-        .background(Theme.windowBackground)
+        .background(VisualEffectView(material: .windowBackground, blendingMode: .behindWindow))
         .onReceive(features.$enabledIDs) { _ in
             // 当前功能被关闭时回退到着陆功能
-            if !features.isEnabled(selected) { selected = features.landing }
+            if !features.isEnabled(features.selectedFeature) { features.selectedFeature = features.landing }
         }
     }
 
@@ -52,7 +54,7 @@ struct MenuBarRootView: View {
             // 导航项（仅已启用功能）
             VStack(spacing: 4) {
                 ForEach(features.enabledDefinitions) { def in
-                    SidebarButton(def: def, selected: $selected)
+                    SidebarButton(def: def, selected: selection)
                 }
             }
             .padding(.horizontal, 12)
@@ -81,47 +83,72 @@ struct MenuBarRootView: View {
             }
         }
         .frame(width: 200)
-        .background(Theme.cardBackground.opacity(0.5))
+        .background(VisualEffectView(material: .sidebar))
     }
 
     // MARK: - 主内容区
 
-    @ViewBuilder
     private var contentArea: some View {
-        Group {
-            if let view = features.content(for: selected) {
-                view
-            } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.secondary)
-                    Text("该功能已关闭")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                    Text("在「偏好设置 → 功能开关」中重新启用")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .id(selected) // 选中变化时整体重建，确保 onAppear 正确触发
+        contentInner
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.22), value: features.selectedFeature)
     }
 
-    /// 返回一个选中指定功能的副本（供 AppDelegate.reveal 切换侧边栏）
-    func selecting(_ feature: FeatureID) -> MenuBarRootView {
-        let copy = self
-        copy.selected = feature
-        return copy
+    @ViewBuilder
+    private var contentInner: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 统一页面顶栏（图标徽章 + 标题 + 副标题），随选中功能切换
+            if let def = features.definitions.first(where: { $0.id == features.selectedFeature }) {
+                PageHeader(icon: def.icon, title: def.title, subtitle: pageSubtitle(for: def.id))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
+            }
+            Group {
+                if let view = features.content(for: features.selectedFeature) {
+                    view
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+                        Text("该功能已关闭")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                        Text("在「偏好设置 → 功能开关」中重新启用")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .id(features.selectedFeature) // 选中变化时整体重建，确保 onAppear 正确触发 + 配合淡入过渡
+        .transition(.opacity)
+    }
+
+    /// 各功能页的副标题（统一补充「被设计」的层次感）
+    private func pageSubtitle(for id: FeatureID) -> String {
+        switch id {
+        case .overview: return "系统实时状态一览"
+        case .diskMount: return "挂载 / 卸载磁盘与卷"
+        case .metalHUD: return "Metal 性能监控浮层"
+        case .appLaunch: return "管理开机自启应用"
+        case .folderMap: return "磁盘空间可视化"
+        case .brew: return "Homebrew 包管理"
+        case .scrollControl: return "滚轮增强与手势"
+        case .rightClick: return "Finder 右键增强"
+        case .cleanup: return "磁盘清理与空间管理"
+        case .launchAgent: return "登录项管理"
+        case .screenshot: return "截图与录屏"
+        }
     }
 
     // MARK: - 应用图标
 
     private var appIcon: some View {
         Group {
-            if let path = Bundle.main.path(forResource: "AppIcon", ofType: "icns"),
-               let image = NSImage(contentsOfFile: path) {
+            if let image = IconCache.appIcon {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -141,6 +168,7 @@ struct MenuBarRootView: View {
 private struct SidebarButton: View {
     let def: FeatureDefinition
     @Binding var selected: FeatureID
+    @State private var hovered = false
     var isSelected: Bool { selected == def.id }
 
     var body: some View {
@@ -162,11 +190,17 @@ private struct SidebarButton: View {
             .padding(.vertical, 9)
             .contentShape(Rectangle())
             .background(
-                Theme.accentGradient
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-                    .opacity(isSelected ? 1 : 0)
+                Group {
+                    if isSelected {
+                        Theme.accentGradient
+                    } else {
+                        Color.primary.opacity(hovered ? 0.06 : 0)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
             )
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }

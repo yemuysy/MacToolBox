@@ -22,11 +22,14 @@ final class FeatureManager: ObservableObject {
     static let shared = FeatureManager()
 
     @Published private(set) var enabledIDs: Set<FeatureID>
+    /// 当前选中的侧栏功能（由主窗口 / 菜单栏 / 右键共享，避免重建视图树）
+    @Published var selectedFeature: FeatureID = .overview
     let definitions: [FeatureDefinition]
 
     private init() {
         self.definitions = Self.buildDefinitions()
         self.enabledIDs = Self.resolveEnabled(definitions: self.definitions)
+        self.selectedFeature = landing
     }
 
     // MARK: - 查询

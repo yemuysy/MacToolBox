@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - 主题
 
@@ -21,6 +22,18 @@ enum Theme {
     static var cardBackground: Color { Color(nsColor: .controlBackgroundColor) }
     static var cardBorder: Color { Color.gray.opacity(0.12) }
     static var windowBackground: Color { Color(nsColor: .windowBackgroundColor) }
+
+    // MARK: - 统一设计令牌（圆角 / 阴影尺度）
+    /// 卡片圆角：柔和但有结构感
+    static let radiusCard: CGFloat = 14
+    /// 控件（按钮 / 输入框）圆角
+    static let radiusControl: CGFloat = 10
+    /// 小元素圆角
+    static let radiusSmall: CGFloat = 7
+    /// 卡片柔和投影，营造悬浮层次
+    static let cardShadowColor: Color = Color.black.opacity(0.07)
+    static let cardShadowRadius: CGFloat = 9
+    static let cardShadowY: CGFloat = 3
 
     static func usageColor(_ percent: Double) -> Color {
         switch percent {
@@ -46,12 +59,29 @@ struct Card<Content: View>: View {
         content
             .padding(padding)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Theme.cardBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Theme.cardBorder, lineWidth: 1)
-                    )
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.radiusCard)
+                        .fill(Theme.cardBackground)
+                    // 顶部细微高光，制造「玻璃面板」的层次
+                    RoundedRectangle(cornerRadius: Theme.radiusCard)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.10), Color.clear],
+                                startPoint: .top,
+                                endPoint: UnitPoint(x: 0.5, y: 0.35)
+                            )
+                        )
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.radiusCard)
+                        .stroke(Theme.cardBorder, lineWidth: 1)
+                )
+            )
+            .shadow(
+                color: Theme.cardShadowColor,
+                radius: Theme.cardShadowRadius,
+                x: 0,
+                y: Theme.cardShadowY
             )
     }
 }
@@ -189,6 +219,40 @@ struct TabHeaderCard<Trailing: View>: View {
     }
 }
 
+// MARK: - 页面顶栏（统一框架，每个功能页顶部复用）
+
+struct PageHeader: View {
+    let icon: String
+    let title: String
+    var subtitle: String = ""
+
+    var body: some View {
+        HStack(spacing: 13) {
+            // 渐变图标徽章
+            ZStack {
+                RoundedRectangle(cornerRadius: 11)
+                    .fill(Theme.accentGradient)
+                    .frame(width: 40, height: 40)
+                    .shadow(color: Theme.accentStart.opacity(0.25), radius: 4, y: 2)
+                Image(systemName: icon)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.primary)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+    }
+}
+
 // MARK: - 信息行
 
 struct InfoRow: View {
@@ -236,6 +300,8 @@ struct UsageCard: View {
                     Text("\(String(format: "%.1f", percent))%")
                         .font(.system(size: 13, weight: .bold).monospacedDigit())
                         .foregroundStyle(color)
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.35), value: percent)
                 }
                 GradientProgressBar(progress: percent / 100, color: color)
                 Spacer(minLength: 0)
@@ -266,6 +332,8 @@ struct NetworkCard: View {
                     Text(formatRateShort(down))
                         .font(.system(size: 11, weight: .bold).monospacedDigit())
                         .foregroundStyle(.blue)
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.35), value: down)
                 }
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -303,6 +371,8 @@ struct TempCard: View {
                     Text(tempText(temperature))
                         .font(.system(size: 13, weight: .bold).monospacedDigit())
                         .foregroundStyle(temperature != nil ? Color.orange : .secondary)
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.35), value: temperature)
                 }
                 Spacer(minLength: 0)
             }
@@ -362,6 +432,8 @@ struct TrendRow: View {
                 Text(value)
                     .font(.system(size: 11, weight: .bold).monospacedDigit())
                     .foregroundStyle(color)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.35), value: value)
             }
             Sparkline(values: values, color: color, maxValue: max)
                 .frame(height: 36)
@@ -494,4 +566,27 @@ struct EmptyState: View {
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity)
     }
+}
+
+// MARK: - 毛玻璃材质
+
+/// macOS 原生磨砂玻璃封装，是「精致感」的核心来源。
+/// - 主窗口根背景用 `blendingMode: .behindWindow` 透出桌面壁纸；
+/// - 侧栏/气泡用 `.withinWindow` 在窗口内做层叠质感。
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode = .withinWindow
+    var state: NSVisualEffectView.State = .active
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = state
+        // 允许子视图（卡片）落在材质之上，形成层次
+        view.wantsLayer = true
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

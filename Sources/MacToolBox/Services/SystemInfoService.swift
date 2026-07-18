@@ -31,6 +31,12 @@ final class SystemInfoService: ObservableObject, @unchecked Sendable {
     private let pollInterval: TimeInterval = 2.0
     /// 温度读取间隔（SMC 内核调用开销大，温度平滑后可降低频率）
     private let tempInterval: TimeInterval = 5.0
+    /// 磁盘枚举间隔：mountedVolumeURLs + resourceValues 是较重的 I/O，
+    /// 无需 2s 一次，降低为 20s 刷新一次（其余轮询复用上一次结果）。
+    private let diskRefreshInterval: TimeInterval = 20.0
+    private var lastDiskUpdate: Date = .distantPast
+    /// 后台队列缓存的磁盘信息（避免在主线程外读取 @Published snapshot）
+    private var cachedDisks: [DiskUsage] = []
 
     private var timer: Timer?
     private var tempTimer: Timer?
@@ -137,9 +143,14 @@ final class SystemInfoService: ObservableObject, @unchecked Sendable {
 
             let cpu = self.readCPUUsage()
             let mem = self.readMemoryUsage()
-            let disks = self.readDiskUsages()
             let uptime = self.readUptime()
             let net = self.readNetworkRate()
+
+            // 磁盘信息低频刷新：距上次枚举超过阈值才重新枚举，否则复用后台缓存
+            let now = Date()
+            let shouldRefreshDisk = now.timeIntervalSince(self.lastDiskUpdate) >= self.diskRefreshInterval
+            let disks = shouldRefreshDisk ? self.readDiskUsages() : self.cachedDisks
+            if shouldRefreshDisk { self.cachedDisks = disks; self.lastDiskUpdate = now }
 
             DispatchQueue.main.async {
                 var snap = self.snapshot
@@ -150,7 +161,9 @@ final class SystemInfoService: ObservableObject, @unchecked Sendable {
                 snap.networkDown = net.down
                 snap.networkUp = net.up
 
-                snap.disks = disks
+                if shouldRefreshDisk {
+                    snap.disks = disks
+                }
                 snap.uptimeSeconds = uptime
 
                 // 追加历史（环形缓冲）
