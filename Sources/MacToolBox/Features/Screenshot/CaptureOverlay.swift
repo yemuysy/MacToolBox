@@ -71,6 +71,8 @@ final class SelectionView: NSView {
     var screenCtx: ScreenContext?
     /// 贴图模式：选中后直接裁图并回调，不弹确认工具条。
     var pinMode: Bool = false
+    /// 标注编辑器保存成功后的通知回调（用于 UI 层更新「最近截图」等）。
+    var onSaved: ((URL) -> Void)?
 
     private enum State { case idle, drawing, selected }
     private enum Drag { case none, drawNew, move, resize(Handle) }
@@ -93,47 +95,56 @@ final class SelectionView: NSView {
     private let handleSize: CGFloat = 9
     private let handleHit: CGFloat = 12
 
-    // 选区确认浮动工具条（完成 / 保存 / 复制 / 取消）
-    private lazy var confirmBar: NSView = {
-        let bar = NSView()
-        bar.wantsLayer = true
-        bar.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        bar.layer?.cornerRadius = 9
-        bar.layer?.borderWidth = 1
-        bar.layer?.borderColor = NSColor.separatorColor.cgColor
-        bar.isHidden = true
-        let items: [(String, String, Selector)] = [
-            ("保存", "square.and.arrow.down", #selector(actSave)),
-            ("复制", "doc.on.doc", #selector(actCopy)),
-            ("贴图", "pin.fill", #selector(actPin)),
-            ("取消", "xmark.circle", #selector(actCancel)),
-        ]
-        let stack = NSStackView()
-        stack.spacing = 4
-        for (title, sym, sel) in items {
-            let b = NSButton(title: title,
-                             image: NSImage(systemSymbolName: sym, accessibilityDescription: nil)!,
-                             target: self, action: sel)
-            b.bezelStyle = .rounded
-            b.font = NSFont.systemFont(ofSize: 12)
-            b.imagePosition = .imageLeading
-            stack.addArrangedSubview(b)
+    // MARK: - 就地标注（替代旧 confirmBar + 编辑弹窗流程）
+
+    /// 标注画布（覆盖在选区上方，仅在有标注工具激活时接收鼠标事件）。
+    private var annotationCanvas: AnnotationCanvas?
+
+    /// 当前选中的标注工具。nil = 选区操作模式（移动/缩放）；非 nil = 绘制模式。
+    private var activeAnnotationTool: AnnotationTool? = nil {
+        didSet {
+            annotationCanvas?.currentTool = activeAnnotationTool ?? .rectangle
+            // 工具切换时通知画布重置拖拽状态
+            if oldValue != nil || activeAnnotationTool != nil { needsDisplay = true }
         }
-        bar.addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 6),
-            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -6),
-            stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 4),
-            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -4),
-        ])
+    }
+
+    /// 裁剪好的选区原图（供画布做背景 + 导出合并）。
+    private var croppedImage: NSImage?
+
+    /// 集成工具条：左侧标注工具 + 颜色 + 撤销 | 右侧 保存 / 复制 / 贴图 / 取消。
+    private lazy var annotToolbar: AnnotationToolbar = {
+        let bar = AnnotationToolbar(frame: NSRect(x: 0, y: 0, width: 600, height: 44))
+        bar.isHidden = true
+        // 标注工具切换 → 记录当前工具
+        bar.onToolChanged = { [weak self] tool in
+            self?.activeAnnotationTool = tool
+        }
+        // 颜色切换 → 同步到画布
+        bar.onColorChanged = { [weak self] color in
+            self?.annotationCanvas?.currentColor = color
+        }
+        // 撤销
+        bar.onUndo = { [weak self] in
+            guard let canvas = self?.annotationCanvas else { return }
+            _ = canvas.undo()
+            self?.updateUndoState()
+        }
+        // 操作按钮绑定
+        bar.bindActions(
+            undo: {},
+            done:   { [weak self] in self?.actSave() },
+            copy:   { [weak self] in self?.actCopy() },
+            pin:    { [weak self] in self?.actPin() },
+            cancel: { [weak self] in self?.actCancel() }
+        )
         return bar
     }()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        addSubview(confirmBar)
+        addSubview(annotToolbar)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -145,11 +156,32 @@ final class SelectionView: NSView {
 
     func setSelection(_ r: NSRect) { rect = r; state = .selected; needsDisplay = true }
 
-    // MARK: 鼠标
+    // MARK: 鼠标事件路由
+
+    /// 判断当前是否应将鼠标事件交给标注画布处理。
+    private func shouldRouteToCanvas(_ point: NSPoint) -> Bool {
+        guard activeAnnotationTool != nil, let r = rect, let _ = annotationCanvas else { return false }
+        return r.contains(point)
+    }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        hideConfirmBar()
+
+        // 点击在工具条上 → 让工具条自己处理
+        if !annotToolbar.isHidden && annotToolbar.frame.contains(p) {
+            super.mouseDown(with: event)
+            return
+        }
+
+        // 标注模式 + 点在选区内 → 转发给画布
+        if shouldRouteToCanvas(p) {
+            window?.makeFirstResponder(annotationCanvas)
+            annotationCanvas?.mouseDown(with: event)
+            return
+        }
+
+        // 以下是原有选区逻辑
+        hideAnnotBar()
         if event.clickCount == 2, state == .selected, let r = rect, r.contains(p) {
             delegate?.selectionDidSave(rect: r)
             return
@@ -176,6 +208,10 @@ final class SelectionView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if shouldRouteToCanvas(p) {
+            annotationCanvas?.mouseDragged(with: event)
+            return
+        }
         switch drag {
         case .drawNew:
             if pendingWindow != nil {
@@ -200,6 +236,12 @@ final class SelectionView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if shouldRouteToCanvas(p), let canvas = annotationCanvas {
+            canvas.mouseUp(with: event)
+            updateUndoState()
+            return
+        }
         switch drag {
         case .drawNew:
             if let w = pendingWindow {
@@ -210,7 +252,7 @@ final class SelectionView: NSView {
                 return
             }
             guard let r = rect, r.width >= 5, r.height >= 5 else {
-                rect = nil; state = .idle; drag = .none; hideConfirmBar(); needsDisplay = true
+                rect = nil; state = .idle; drag = .none; hideAnnotBar(); needsDisplay = true
                 delegate?.selectionCancelled()
                 return
             }
@@ -223,6 +265,9 @@ final class SelectionView: NSView {
             needsDisplay = true
         case .none: break
         }
+
+        // 拖拽结束后如果工具条可见，重新布局（选区可能移动了）
+        if !annotToolbar.isHidden, let r = rect { layoutAnnotBar(for: r) }
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -232,7 +277,9 @@ final class SelectionView: NSView {
             return
         }
         if let r = rect, state == .selected {
-            if hitHandle(p, r) != nil { NSCursor.crosshair.set() }
+            if activeAnnotationTool != nil && r.contains(p) {
+                NSCursor.crosshair.set()
+            } else if hitHandle(p, r) != nil { NSCursor.crosshair.set() }
             else if r.contains(p) { NSCursor.openHand.set() }
             else { NSCursor.crosshair.set() }
         }
@@ -253,7 +300,6 @@ final class SelectionView: NSView {
         }
     }
 
-    /// 把全局 Cocoa 点转成视图局部点。
     private func globalToLocal(_ global: NSPoint) -> NSPoint {
         screenCtx?.globalToView(global) ?? global
     }
@@ -264,7 +310,6 @@ final class SelectionView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext,
               let sctx = screenCtx else { return }
 
-        // 背景快照（已垂直翻转绘制）
         drawBackground(ctx: ctx, sctx: sctx)
 
         if state == .idle {
@@ -275,7 +320,6 @@ final class SelectionView: NSView {
                 ctx.stroke(h.insetBy(dx: -1.5, dy: -1.5))
                 drawLabel(ctx: ctx, rect: h)
             } else {
-                // 进入截图但未框选：整屏蒙版，提示已进入截图模式
                 dimWhole(ctx: ctx)
             }
             return
@@ -310,7 +354,6 @@ final class SelectionView: NSView {
         ctx.fillPath(using: .evenOdd)
     }
 
-    /// 整屏蒙版（无挖洞），用于 idle 态提示已进入截图。
     private func dimWhole(ctx: CGContext) {
         ctx.setFillColor(NSColor.black.withAlphaComponent(dim).cgColor)
         ctx.fill(bounds)
@@ -385,58 +428,130 @@ final class SelectionView: NSView {
                       width: abs(maxX - minX), height: abs(maxY - minY))
     }
 
-    // MARK: - 确认工具条
+    // MARK: - 集成工具条与标注画布
 
-    private func showConfirmBar(for r: NSRect) {
-        confirmBar.isHidden = false
-        layoutConfirmBar(for: r)
+    private func showAnnotBar(for r: NSRect) {
+        annotToolbar.isHidden = false
+        layoutAnnotBar(for: r)
     }
-    private func hideConfirmBar() {
-        confirmBar.isHidden = true
+
+    private func hideAnnotBar() {
+        annotToolbar.isHidden = true
     }
-    /// 选区完成：贴图模式直接回调选区，普通模式弹确认工具条。
+
+    /// 安装标注画布：裁剪选区图 → 创建画布覆盖选区 → 显示集成工具条。
+    private func setupAnnotationCanvas(for r: NSRect) {
+        // 先清理旧的画布
+        annotationCanvas?.removeFromSuperview()
+        annotationCanvas = nil
+
+        guard let img = screenCtx?.crop(r) else { return }
+        croppedImage = img
+
+        let canvas = AnnotationCanvas(frame: r)
+        canvas.configure(image: img, scale: 1.0, origin: .zero)
+        canvas.currentColor = annotToolbar.selectedColor
+        canvas.lineWidth = 3
+        canvas.onShapeCountChanged = { [weak self] in self?.updateUndoState() }
+        addSubview(canvas)
+        // 确保工具条在画布之上（通过调整 subview 顺序）
+        annotToolbar.removeFromSuperview()
+        addSubview(annotToolbar)
+
+        annotationCanvas = canvas
+    }
+
+    /// 选区完成：贴图模式直接回调；普通模式安装标注画布 + 弹集成工具条。
     private func finishSelection(_ r: NSRect) {
         if pinMode {
-            hideConfirmBar()
+            hideAnnotBar()
             delegate?.selectionDidSave(rect: r)
         } else {
-            showConfirmBar(for: r)
+            setupAnnotationCanvas(for: r)
+            showAnnotBar(for: r)
         }
     }
-    private func layoutConfirmBar(for r: NSRect) {
-        let bw: CGFloat = 300
-        let bh: CGFloat = 36
+
+    private func layoutAnnotBar(for r: NSRect) {
+        let bw: CGFloat = 620
+        let bh: CGFloat = 44
         var x = r.midX - bw / 2
         var y = r.maxY + 8                       // flipped 坐标系：下方即 y 增大
         x = min(max(x, 6), bounds.width - bw - 6)
         if y + bh > bounds.height - 6 { y = r.minY - bh - 8 }   // 下方空间不足则翻到上方
         if y < 6 { y = 6 }
-        confirmBar.frame = NSRect(x: x, y: y, width: bw, height: bh)
+        annotToolbar.frame = NSRect(x: x, y: y, width: bw, height: bh)
+    }
+
+    /// 更新撤销按钮状态（根据画布是否有可撤销内容）。
+    private func updateUndoState() {
+        annotToolbar.setUndoEnabled(annotationCanvas?.canUndo ?? false)
+    }
+
+    // MARK: - 操作动作
+
+    /// 导出最终图片（有标注则合并，无标注则用原图）。
+    private func exportFinalImage() -> NSImage? {
+        if let canvas = annotationCanvas, canvas.canUndo {
+            return canvas.exportImage()
+        }
+        return croppedImage
     }
 
     @objc private func actSave() {
         guard let r = rect, state == .selected else { return }
-        hideConfirmBar()
-        delegate?.selectionDidSave(rect: r)
-    }
-    @objc private func actCopy() {
-        guard let r = rect, state == .selected else { return }
-        hideConfirmBar()
-        delegate?.selectionDidCopy(rect: r)
-    }
-    @objc private func actCancel() {
-        hideConfirmBar()
-        delegate?.selectionCancelled()
-    }
-    @objc private func actPin() {
-        guard let r = rect, state == .selected else { return }
-        hideConfirmBar()
-        delegate?.selectionDidPin(rect: r)
+        hideAnnotBar()
+        // 标记完成（释放叠层），但由我们自行输出
+        delegate?.markFinished()
+        let finalImage = exportFinalImage() ?? screenCtx?.crop(r)
+        let dir = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+        let url = dir.appendingPathComponent(ScreenshotFlow.buildFilename())
+        if let img = finalImage, ScreenshotFlow.savePNG(img, to: url) {
+            onSaved?(url)
+        }
     }
 
+    @objc private func actCopy() {
+        guard let r = rect, state == .selected else { return }
+        hideAnnotBar()
+        delegate?.markFinished()
+        let finalImage = exportFinalImage() ?? screenCtx?.crop(r)
+        if let img = finalImage {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.writeObjects([img])
+        }
+    }
+
+    @objc private func actPin() {
+        guard let r = rect, state == .selected else { return }
+        hideAnnotBar()
+        delegate?.markFinished()
+        let finalImage = exportFinalImage() ?? screenCtx?.crop(r)
+        if let img = finalImage {
+            PinManager.shared.pin(img)
+        }
+    }
+
+    @objc private func actCancel() {
+        hideAnnotBar()
+        delegate?.selectionCancelled()
+    }
+
+    // MARK: 键盘
+
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { actCancel(); return }                          // Esc → 取消（任意状态）
+        if event.keyCode == 53 { actCancel(); return }                          // Esc → 取消
         if state == .selected, event.keyCode == 36 { actSave(); return }        // Return → 保存
+        // Cmd+Z → undo annotations
+        if event.modifierFlags.contains(.command), event.keyCode == 6 {
+            if let canvas = annotationCanvas, canvas.canUndo {
+                _ = canvas.undo()
+                updateUndoState()
+            }
+            return
+        }
         super.keyDown(with: event)
     }
 
@@ -454,6 +569,8 @@ final class SelectionView: NSView {
     func selectionDidCopy(rect: NSRect)
     func selectionDidPin(rect: NSRect)
     func selectionCancelled()
+    /// 标注编辑器路径：释放叠层资源但不触发 completion（由编辑器回调处理最终输出）。
+    func markFinished()
 }
 
 // MARK: - 叠层窗口
@@ -611,6 +728,15 @@ final class OverlayWindow: NSWindow {
             freeScreens()
             CaptureSession.release(state: state)
             completion(nil)
+        }
+        /// 标注编辑器路径：释放叠层 + 标记完成，但由编辑器回调决定最终输出。
+        func markFinished() {
+            guard !state.finished else { return }
+            state.finished = true
+            for o in overlays { o.orderOut(nil) }
+            freeScreens()
+            CaptureSession.release(state: state)
+            // 不调用 completion —— 由 AnnotationEditorManager.onDone/onCancel 处理
         }
 
         func selectionDidSave(rect: NSRect) {

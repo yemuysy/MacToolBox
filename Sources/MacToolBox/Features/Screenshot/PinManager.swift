@@ -149,15 +149,33 @@ final class PinImageView: NSView {
     /// 在当前光标所在屏幕居中贴一张图。
     func pin(_ image: NSImage) {
         let screen = activeScreen()
-        let size = PinManager.fittedSize(for: image.size)
+        /// 截图得到的 NSImage 在 Retina 下 size 为设备像素（2×），若直接按原尺寸贴图会放大显示；
+        /// 统一换算回逻辑点尺寸，使贴图默认 1:1 还原屏幕上的原始区域大小。
+        let norm = PinManager.logicalImage(image, for: screen)
+        let size = PinManager.fittedSize(for: norm.size)
         let origin = NSPoint(
             x: screen.visibleFrame.midX - size.width / 2,
             y: screen.visibleFrame.midY - size.height / 2
         )
-        let win = PinWindow(image: image, origin: origin)
+        let win = PinWindow(image: norm, origin: origin)
         windows.append(win)
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
+    }
+
+    /// 把设备像素尺寸的截图换算为逻辑点尺寸（保留原始高分辨率位图，绘制时自动降采样仍清晰）。
+    private static func logicalImage(_ image: NSImage, for screen: NSScreen) -> NSImage {
+        let scale = screen.backingScaleFactor
+        guard scale > 1.0001 else { return image }
+        let logical = NSSize(width: image.size.width / scale, height: image.size.height / scale)
+        let result = NSImage(size: logical)
+        if let rep = image.representations.first {
+            result.addRepresentation(rep)
+        } else if let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            result.addRepresentation(NSBitmapImageRep(cgImage: cg))
+        }
+        result.size = logical
+        return result
     }
 
     func add(_ w: PinWindow) { windows.append(w) }
