@@ -2,10 +2,14 @@
 """生成 MacToolBox 的 Finder 快速操作（Quick Action）。
 
 产出一个 .workflow 放到 ~/Library/Services/，右键文件即可在
-「快速操作」子菜单看到「MacToolBox」，点击后把选中的文件路径通过
+「快速操作」/「服务」子菜单看到「MacToolBox」，点击后把选中的文件路径通过
 mactoolbox://pick?paths=... 交给主程序弹出动作选择器。
 
 免费、无需证书，ad-hoc 签名也能稳定出现在 Finder 右键。
+
+结构严格对齐系统自带 workflow（如 /System/Library/Services/Show Map.workflow）：
+  MacToolBox.workflow/Contents/Info.plist              <- 含 NSServices 声明
+  MacToolBox.workflow/Contents/Resources/document.wflow <- Automator 工作流
 """
 import os
 import plistlib
@@ -26,37 +30,49 @@ ENC="${ENC%|}"
 /usr/bin/open "mactoolbox://pick?paths=${ENC}"
 """
 
+# Info.plist：声明为右键服务（NSServices），系统据此注册到 Finder 右键菜单
 INFO = {
-    "AMApplicationBuild": "1",
-    "AMApplicationVersion": "1.0",
+    "NSServices": [
+        {
+            "NSMenuItem": {"default": "MacToolBox"},
+            "NSMessage": "runWorkflowAsService",
+            "NSRequiredContext": {},
+            "NSSendTypes": ["NSFilenamesPboardType"],
+        }
+    ],
+    "CFBundleDevelopmentRegion": "en_US",
+    "CFBundleIdentifier": "com.yemu.mactoolbox.quickaction",
     "CFBundleName": "MacToolBox",
     "CFBundleShortVersionString": "1.0",
     "CFBundleVersion": "1",
-    "NeedsToBeRunAsAppleScript": False,
-    "NSAppleScriptEnabled": False,
-    "conformsToSystemMetadata": True,
 }
 
+# document.wflow：Automator 工作流，单个 Run Shell Script 动作
 WF = {
+    "AMApplicationBuild": "346",
+    "AMApplicationVersion": "2.3",
     "AMDocumentVersion": "2",
     "actions": [
         {
             "action": {
                 "AMAccepts": {
                     "Container": "List",
-                    "Items": {"0": {"Type": "com.apple.cocoa.path"}},
+                    "Optional": True,
+                    "Types": ["com.apple.cocoa.path"],
                 },
-                "AMActionVersion": "2.0.1",
-                "AMApplication": {
-                    "AMApplicationBundleIdentifier": "com.apple.Automator",
-                    "AMApplicationName": "Automator",
-                    "AMApplicationVersion": "1.0",
-                    "AMBuildVersion": "1",
+                "AMActionVersion": "2.0.3",
+                "AMApplication": ["Automator"],
+                "AMParameterProperties": {
+                    "COMMAND_STRING": {},
+                    "CheckedForUserDefaultShell": {},
+                    "inputMethod": {},
+                    "Shell": {},
+                    "source": {},
                 },
-                "AMParameterProperties": {},
                 "AMProvides": {
                     "Container": "List",
-                    "Items": {"0": {"Type": "com.apple.cocoa.string"}},
+                    "Optional": True,
+                    "Types": ["com.apple.cocoa.string"],
                 },
                 "ActionClass": "RunShellScript",
                 "ActionName": "Run Shell Script",
@@ -68,12 +84,12 @@ WF = {
                     "Shell": "/bin/bash",
                     "source": SCRIPT,
                     "arguments": [{"0": {"default": "", "type": "0"}}],
+                    "inputMethod": "0",
                 },
                 "BundleIdentifier": "com.apple.RunShellScript",
-                "CFBundleVersion": "2.0.1",
+                "CFBundleVersion": "2.0.3",
                 "Command": SCRIPT,
                 "Input": "filePaths",
-                "MSOActionCompatibleVersion": "1",
             },
             "isViewVisible": True,
         }
@@ -81,24 +97,20 @@ WF = {
     "connectors": {},
     "workflowMetaData": {
         "clientOSTypes": ["macos"],
-        "extensionOverlayIsShown": True,
-        "fileExtensionOverlay": "",
         "receivesInput": True,
         "inputType": "fileOrFolder",
         "applicationBundleIdentifier": "com.apple.finder",
         "serviceType": "1",
-        "iconImagePath": "",
         "workflowType": "1",
-        "color": "Indigo",
     },
 }
 
 if os.path.exists(WF_PATH):
     shutil.rmtree(WF_PATH)
-os.makedirs(WF_PATH, exist_ok=True)
-with open(os.path.join(WF_PATH, "Info.plist"), "wb") as f:
+os.makedirs(os.path.join(WF_PATH, "Contents", "Resources"), exist_ok=True)
+with open(os.path.join(WF_PATH, "Contents", "Info.plist"), "wb") as f:
     plistlib.dump(INFO, f)
-with open(os.path.join(WF_PATH, "document.wflow"), "wb") as f:
+with open(os.path.join(WF_PATH, "Contents", "Resources", "document.wflow"), "wb") as f:
     plistlib.dump(WF, f)
 
 print("created:", WF_PATH)
