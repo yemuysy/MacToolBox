@@ -8,7 +8,6 @@ enum AnnotationTool: String, CaseIterable {
     case arrow     = "箭头"
     case pen       = "画笔"
     case text      = "文字"
-    case mosaic    = "马赛克"
 
     var icon: String {
         switch self {
@@ -17,7 +16,6 @@ enum AnnotationTool: String, CaseIterable {
         case .arrow:     return "arrow.up.right"
         case .pen:       return "pencil"
         case .text:      return "textformat"
-        case .mosaic:    return "square.grid.3x3.fill"
         }
     }
 }

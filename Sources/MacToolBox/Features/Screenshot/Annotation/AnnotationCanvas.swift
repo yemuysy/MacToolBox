@@ -24,6 +24,22 @@ final class AnnotationCanvas: NSView {
     /// 当前线宽（矩形/椭圆/箭头/画笔通用）。
     var lineWidth: CGFloat = 3
 
+    /// 是否接收鼠标事件。仅当标注工具激活时为 true；
+    /// 为 false 时 hitTest 返回 nil，让事件穿透到下层选区视图（用于移动/缩放选区）。
+    var isInteractive: Bool = false
+
+    /// 与父视图 SelectionView 一致使用翻转坐标系（原点左下、y 向上）。
+    /// 否则作为子视图以 frame = r（flipped 坐标）添加时，flipped 不一致会让 AppKit
+    /// 把画布纵向镜像放置 —— 选区越靠屏幕上方，画布被放到越靠下，截图背景整体偏下。
+    override var isFlipped: Bool { true }
+
+    // MARK: - 事件穿透
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard isInteractive else { return nil }
+        return super.hitTest(point)
+    }
+
     /// 画布缩放比例（1.0 = 原始大小）。
     private var scale: CGFloat = 1.0
 
@@ -51,8 +67,6 @@ final class AnnotationCanvas: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.magnificationFilter = .nearest
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -91,42 +105,33 @@ final class AnnotationCanvas: NSView {
     var canUndo: Bool { !shapes.isEmpty }
 
     /// 导出合并后的最终图片（原图 + 所有标注渲染在一起）。
+    /// 使用 lockFocus 确保 NSImage.draw 在正确的 AppKit 图形上下文中执行。
     func exportImage() -> NSImage? {
-        guard let img = backgroundImage else { return nil }
-        let size = img.size
+        guard let bg = backgroundImage else { return nil }
+        let size = bg.size
 
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(size.width),
-            pixelsHigh: Int(size.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else { return nil }
+        let result = NSImage(size: size)
+        result.lockFocus()
 
-        let ctx = NSGraphicsContext(bitmapImageRep: rep)!.cgContext
+        // 1️⃣ 先画背景图（AppKit 坐标系，lockFocus 保证上下文正确）
+        bg.draw(in: NSRect(origin: .zero, size: size))
+
+        // 2️⃣ 再画标注（标注坐标是图片像素空间，需翻转 CG 坐标系）
+        guard let ctx = NSGraphicsContext.current?.cgContext else {
+            result.unlockFocus()
+            return result  // 无标注时直接返回背景图
+        }
+
         ctx.saveGState()
-
-        // Flip 坐标系（NSImage / CG 一致）
         ctx.translateBy(x: 0, y: size.height)
         ctx.scaleBy(x: 1, y: -1)
 
-        // 绘制原图
-        img.draw(in: CGRect(origin: .zero, size: size))
-
-        // 绘制所有标注（坐标从视图空间映射回图片空间）
         for shape in shapes {
             shape.draw(in: ctx)
         }
 
         ctx.restoreGState()
-
-        let result = NSImage(size: size)
-        result.addRepresentation(rep)
+        result.unlockFocus()
         return result
     }
 
@@ -138,6 +143,7 @@ final class AnnotationCanvas: NSView {
 
         // 画背景图
         if let img = backgroundImage {
+            ctx.interpolationQuality = .high
             let drawRect = CGRect(
                 x: imageOrigin.x,
                 y: imageOrigin.y,
@@ -219,10 +225,6 @@ final class AnnotationCanvas: NSView {
         case .pen:
             penPoints.append(cur)
             previewShape = .pen(points: penPoints, lineWidth: lineWidth, color: currentColor)
-
-        case .mosaic:
-            let r = normalizedRect(from: mouseDownPoint, to: cur)
-            previewShape = .mosaic(rect: r)
 
         case .text:
             break

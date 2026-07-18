@@ -46,12 +46,14 @@ final class ScreenContext {
                 y: primaryHeight - (view.y + screen.frame.origin.y))
     }
 
-    /// 从视图局部选区（y 向上，单位=点）裁剪出设备像素图。
+    /// 从视图局部选区裁剪出设备像素图。
+    /// 坐标约定：视图局部为翻转系（原点=屏幕左上、y 向下、单位=点），
+    /// 而 cgImage 像素坐标同为（原点=屏幕左上、y 向下）。
+    /// 二者一致，故裁剪顶部 y 直接取 `viewRect.origin.y * scale`，无需任何镜像换算。
     func crop(_ viewRect: NSRect) -> NSImage? {
         let scale = screen.backingScaleFactor
         let x = max(0, viewRect.origin.x * scale)
-        let yTop = viewRect.origin.y + viewRect.height  // 视图顶部
-        let cgY = max(0, (screen.frame.height - yTop) * scale)
+        let cgY = max(0, viewRect.origin.y * scale)
         let w = max(1, viewRect.width * scale)
         let h = max(1, viewRect.height * scale)
         guard let cg = cgImage,
@@ -103,36 +105,45 @@ final class SelectionView: NSView {
     /// 当前选中的标注工具。nil = 选区操作模式（移动/缩放）；非 nil = 绘制模式。
     private var activeAnnotationTool: AnnotationTool? = nil {
         didSet {
-            annotationCanvas?.currentTool = activeAnnotationTool ?? .rectangle
-            // 工具切换时通知画布重置拖拽状态
-            if oldValue != nil || activeAnnotationTool != nil { needsDisplay = true }
+            if let tool = activeAnnotationTool {
+                // 选中工具：懒安装画布（若尚未安装），并启用交互
+                if annotationCanvas == nil, let r = rect {
+                    setupAnnotationCanvas(for: r)
+                }
+                annotationCanvas?.currentTool = tool
+                annotationCanvas?.isInteractive = true
+            } else {
+                // 取消工具：画布不再拦截事件，事件穿透到选区（可移动/缩放）
+                annotationCanvas?.isInteractive = false
+            }
+            needsDisplay = true
         }
     }
-
-    /// 裁剪好的选区原图（供画布做背景 + 导出合并）。
-    private var croppedImage: NSImage?
 
     /// 集成工具条：左侧标注工具 + 颜色 + 撤销 | 右侧 保存 / 复制 / 贴图 / 取消。
     private lazy var annotToolbar: AnnotationToolbar = {
         let bar = AnnotationToolbar(frame: NSRect(x: 0, y: 0, width: 600, height: 44))
         bar.isHidden = true
-        // 标注工具切换 → 记录当前工具
+        // 标注工具切换 → 记录当前工具（懒安装画布）
         bar.onToolChanged = { [weak self] tool in
             self?.activeAnnotationTool = tool
+        }
+        // 再次点击已选中工具 → 退出绘制模式（画布仍保留已画内容，可重新调整选区）
+        bar.onToolDeselected = { [weak self] in
+            self?.activeAnnotationTool = nil
         }
         // 颜色切换 → 同步到画布
         bar.onColorChanged = { [weak self] color in
             self?.annotationCanvas?.currentColor = color
         }
-        // 撤销
-        bar.onUndo = { [weak self] in
-            guard let canvas = self?.annotationCanvas else { return }
-            _ = canvas.undo()
-            self?.updateUndoState()
-        }
-        // 操作按钮绑定
+        // 操作按钮绑定（undo/done/copy/pin/cancel 统一在此设置；
+        // 注意：bindActions 内部会 `onUndo = undo`，切勿再单独设 bar.onUndo，否则会被空闭包覆盖）
         bar.bindActions(
-            undo: {},
+            undo:   { [weak self] in
+                guard let canvas = self?.annotationCanvas else { return }
+                _ = canvas.undo()
+                self?.updateUndoState()
+            },
             done:   { [weak self] in self?.actSave() },
             copy:   { [weak self] in self?.actCopy() },
             pin:    { [weak self] in self?.actPin() },
@@ -167,9 +178,9 @@ final class SelectionView: NSView {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
 
-        // 点击在工具条上 → 让工具条自己处理
+        // 点在工具条区域：交给工具条自行处理（命中按钮会触发 toolTapped），
+        // 且不要在 SelectionView 内误触发重新框选。
         if !annotToolbar.isHidden && annotToolbar.frame.contains(p) {
-            super.mouseDown(with: event)
             return
         }
 
@@ -177,6 +188,11 @@ final class SelectionView: NSView {
         if shouldRouteToCanvas(p) {
             window?.makeFirstResponder(annotationCanvas)
             annotationCanvas?.mouseDown(with: event)
+            return
+        }
+
+        // 已选中标注工具时，选区外/工具条外的点击直接忽略（避免误触重新框选）
+        if activeAnnotationTool != nil {
             return
         }
 
@@ -261,7 +277,16 @@ final class SelectionView: NSView {
             needsDisplay = true
         case .move, .resize:
             drag = .none
-            if let r = rect { finishSelection(r) }
+            if let r = rect {
+                finishSelection(r)
+                // 画布已存在（此前标注过但当前未选工具）→ 跟随选区刷新裁剪与位置
+                if let canvas = annotationCanvas,
+                   let img = screenCtx?.crop(r) {
+                    let displayScale = 1.0 / (screenCtx?.screen.backingScaleFactor ?? 1.0)
+                    canvas.frame = r
+                    canvas.configure(image: img, scale: displayScale, origin: .zero)
+                }
+            }
             needsDisplay = true
         case .none: break
         }
@@ -446,10 +471,12 @@ final class SelectionView: NSView {
         annotationCanvas = nil
 
         guard let img = screenCtx?.crop(r) else { return }
-        croppedImage = img
 
         let canvas = AnnotationCanvas(frame: r)
-        canvas.configure(image: img, scale: 1.0, origin: .zero)
+        // 关键点：crop 返回的是设备像素（Retina 下 2×）图，而画布 frame 是逻辑点尺寸。
+        // 用 1/backingScaleFactor 作为绘制缩放，使背景图按逻辑尺寸 1:1 显示，而非放大 2×。
+        let displayScale = 1.0 / (screenCtx?.screen.backingScaleFactor ?? 1.0)
+        canvas.configure(image: img, scale: displayScale, origin: .zero)
         canvas.currentColor = annotToolbar.selectedColor
         canvas.lineWidth = 3
         canvas.onShapeCountChanged = { [weak self] in self?.updateUndoState() }
@@ -458,22 +485,23 @@ final class SelectionView: NSView {
         annotToolbar.removeFromSuperview()
         addSubview(annotToolbar)
 
+        canvas.isInteractive = true   // 仅在此刻（已选中工具）才启用交互
         annotationCanvas = canvas
     }
 
-    /// 选区完成：贴图模式直接回调；普通模式安装标注画布 + 弹集成工具条。
+    /// 选区完成：贴图模式直接回调；普通模式**仅弹工具条**，不立即安装画布——
+    /// 这样用户仍可自由移动/缩放选区，直到真正点选某个标注工具才进入绘制模式。
     private func finishSelection(_ r: NSRect) {
         if pinMode {
             hideAnnotBar()
             delegate?.selectionDidSave(rect: r)
         } else {
-            setupAnnotationCanvas(for: r)
             showAnnotBar(for: r)
         }
     }
 
     private func layoutAnnotBar(for r: NSRect) {
-        let bw: CGFloat = 620
+        let bw: CGFloat = 440
         let bh: CGFloat = 44
         var x = r.midX - bw / 2
         var y = r.maxY + 8                       // flipped 坐标系：下方即 y 增大
@@ -490,20 +518,21 @@ final class SelectionView: NSView {
 
     // MARK: - 操作动作
 
-    /// 导出最终图片（有标注则合并，无标注则用原图）。
+    /// 导出最终图片（有标注则合并标注层，无标注则裁原图）。
     private func exportFinalImage() -> NSImage? {
         if let canvas = annotationCanvas, canvas.canUndo {
             return canvas.exportImage()
         }
-        return croppedImage
+        guard let r = rect else { return nil }
+        return screenCtx?.crop(r)
     }
 
     @objc private func actSave() {
         guard let r = rect, state == .selected else { return }
         hideAnnotBar()
-        // 标记完成（释放叠层），但由我们自行输出
-        delegate?.markFinished()
+        // 先取图（此时 screenCtx 尚未被 markFinished 释放），再标记完成释放叠层
         let finalImage = exportFinalImage() ?? screenCtx?.crop(r)
+        delegate?.markFinished()
         let dir = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory())
         let url = dir.appendingPathComponent(ScreenshotFlow.buildFilename())
@@ -515,8 +544,9 @@ final class SelectionView: NSView {
     @objc private func actCopy() {
         guard let r = rect, state == .selected else { return }
         hideAnnotBar()
-        delegate?.markFinished()
+        // 先取图（screenCtx 尚未被释放），再标记完成释放叠层
         let finalImage = exportFinalImage() ?? screenCtx?.crop(r)
+        delegate?.markFinished()
         if let img = finalImage {
             let pb = NSPasteboard.general
             pb.clearContents()
@@ -527,8 +557,8 @@ final class SelectionView: NSView {
     @objc private func actPin() {
         guard let r = rect, state == .selected else { return }
         hideAnnotBar()
-        delegate?.markFinished()
         let finalImage = exportFinalImage() ?? screenCtx?.crop(r)
+        delegate?.markFinished()
         if let img = finalImage {
             PinManager.shared.pin(img)
         }
