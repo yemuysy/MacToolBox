@@ -40,23 +40,26 @@ final class AnnotationToolbar: NSView {
     private var toolButtons: [NSButton] = []
 
     /// 颜色色块按钮（点击弹出系统取色器）。
-    private lazy var colorWell: NSView = {
-        let v = NSView(frame: CGRect(x: 0, y: 0, width: 22, height: 22))
-        v.wantsLayer = true
-        v.layer?.backgroundColor = selectedColor.cgColor
-        v.layer?.cornerRadius = 6
-        v.layer?.borderWidth = 1.5
-        v.layer?.borderColor = NSColor.white.withAlphaComponent(0.5).cgColor
-        // 阴影让色块更立体
-        v.layer?.shadowColor = NSColor.black.withAlphaComponent(0.15).cgColor
-        v.layer?.shadowOffset = CGSize(width: 0, height: 1)
-        v.layer?.shadowRadius = 2
-        v.layer?.shadowOpacity = 1
-
-        // 点击弹出颜色面板
-        let click = NSClickGestureRecognizer(target: self, action: #selector(pickColor))
-        v.addGestureRecognizer(click)
-        return v
+    private lazy var colorWell: NSButton = {
+        let btn = NSButton(frame: CGRect(x: 0, y: 0, width: 22, height: 22))
+        btn.isBordered = false
+        btn.bezelStyle = .inline
+        btn.title = ""
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 6
+        btn.layer?.borderWidth = 1.5
+        btn.layer?.borderColor = NSColor.white.withAlphaComponent(0.5).cgColor
+        btn.layer?.shadowColor = NSColor.black.withAlphaComponent(0.15).cgColor
+        btn.layer?.shadowOffset = CGSize(width: 0, height: 1)
+        btn.layer?.shadowRadius = 2
+        btn.layer?.shadowOpacity = 1
+        btn.layer?.backgroundColor = selectedColor.cgColor
+        btn.target = self
+        btn.action = #selector(pickColor)
+        // NSButton 无 title/image 时 intrinsic size 为 0，NSStackView 会压缩 → 显式约束
+        btn.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        btn.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        return btn
     }()
 
     private lazy var undoButton = makeIconButton("arrow.uturn.backward")
@@ -186,8 +189,8 @@ final class AnnotationToolbar: NSView {
         panel.setTarget(self)
         panel.setAction(#selector(colorPicked(_:)))
         panel.orderFront(nil)
-        // 确保面板不藏在叠层窗口后面
-        panel.level = .floating
+        // 叠层窗口 level=.screenSaver，面板必须同级或更高才能显示在叠层之上
+        panel.level = .screenSaver
     }
 
     @objc private func colorPicked(_ sender: NSColorPanel) {

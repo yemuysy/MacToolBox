@@ -84,8 +84,13 @@ enum AnnotationShape: Sendable {
             let line = CTLineCreateWithAttributedString(NSAttributedString(string: str, attributes: attr))
             var ascent: CGFloat = 0
             _ = CTLineGetTypographicBounds(line, &ascent, nil, nil)
-            ctx.textPosition = CGPoint(x: origin.x, y: origin.y - ascent + size)
+            ctx.saveGState()
+            // 画布是翻转坐标系（y 向下），Core Text 默认 y 向上 → 翻转 text matrix 使文字正向
+            ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+            // baseline 在 origin 下方 ascent 处（y 向下 = 更大的 y）；文字顶部对齐 origin
+            ctx.textPosition = CGPoint(x: origin.x, y: origin.y + ascent)
             CTLineDraw(line, ctx)
+            ctx.restoreGState()
 
         case let .mosaic(rect):
             // 马赛克：将区域像素化（在画布上绘制模糊色块网格）
