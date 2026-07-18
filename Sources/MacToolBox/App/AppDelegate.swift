@@ -59,6 +59,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// 处理 mactoolbox:// URL（来自 Finder 快速操作）。
+    /// 格式：mactoolbox://pick?paths=<url-encoded-path>|<url-encoded-path>|...
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for u in urls where u.scheme == "mactoolbox" {
+            let comps = URLComponents(url: u, resolvingAgainstBaseURL: false)
+            let action = (comps?.path ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard action == "pick" else { continue }
+            guard let enc = comps?.queryItems?.first(where: { $0.name == "paths" })?.value else { continue }
+            let urls = enc
+                .components(separatedBy: "|")
+                .compactMap { $0.removingPercentEncoding }
+                .filter { !$0.isEmpty }
+                .map { URL(fileURLWithPath: $0) }
+            guard !urls.isEmpty else { continue }
+            QuickActionPicker.present(urls: urls)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         statusTitleCancellable = nil
         SystemInfoService.shared.stop()

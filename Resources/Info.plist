@@ -146,5 +146,22 @@
 			<array><string>NSFilenamesPboardType</string></array>
 		</dict>
 	</array>
+
+	<!-- 快速操作（Quick Action）入口：Finder 右键「快速操作」→ MacToolBox
+	     调用 mactoolbox://pick?paths=... 唤起 App 内的动作选择器。
+	     这是 ad-hoc 签名下也能稳定出现的免费右键路线。 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.yemu.mactoolbox</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mactoolbox</string>
+			</array>
+			<key>CFBundleURLIconFile</key>
+			<string>AppIcon</string>
+		</dict>
+	</array>
 </dict>
 </plist>
